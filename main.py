@@ -51,8 +51,8 @@ if __name__ == "__main__":
     # Parse the given playlist
     playlist_songs = parse_playlist(
         playlist_id=
-        "https://open.spotify.com/playlist/0m66VKTjiV89OJsE0NHRFa?si=ca4cd434f9a1437a" # Liz 11/28
-        #"https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
+        # "https://open.spotify.com/playlist/0m66VKTjiV89OJsE0NHRFa?si=ca4cd434f9a1437a" # Liz 11/28
+        "https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
         #"https://open.spotify.com/playlist/601jBGXOfsMFZh3DfNcrVh?si=af574fa0ea364c27" # Mine
     )
     
@@ -70,71 +70,71 @@ if __name__ == "__main__":
         ]
     )
     
-# -------------------------------------------------------------------------------------------------
-# Match Profile 
-# -------------------------------------------------------------------------------------------------       
+# # -------------------------------------------------------------------------------------------------
+# # Match Profile 
+# # -------------------------------------------------------------------------------------------------       
 
-    # Define a target tempo profile for n songs
-    n_songs = len(playlist_summary)
-    n_cycles = 1
-    amplitude = 27
-    mean = 100
-    song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
-    song_profile = amplitude*np.sin(song_idx) + mean
+#     # Define a target tempo profile for n songs
+#     n_songs = len(playlist_summary)
+#     n_cycles = 1
+#     amplitude = 27
+#     mean = 100
+#     song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
+#     song_profile = amplitude*np.sin(song_idx) + mean
     
-    # Match the profile with songs
-    selected_songs = dj.match_tempo_profile(
-        song_profile, 
-        playlist_summary,
-        method="supersampled_euclidean"
-    )
+#     # Match the profile with songs
+#     selected_songs = dj.match_tempo_profile(
+#         song_profile, 
+#         playlist_summary,
+#         method="supersampled_euclidean"
+#     )
     
-    if isinstance(selected_songs, dict):
-        song_profile = song_profile[selected_songs['profile_indices']]
-        selected_songs = selected_songs['selected_songs']
+#     if isinstance(selected_songs, dict):
+#         song_profile = song_profile[selected_songs['profile_indices']]
+#         selected_songs = selected_songs['selected_songs']
         
-    # Quantify the error
-    error = mean_absolute_error(song_profile, selected_songs['tempo'])
+#     # Quantify the error
+#     error = mean_absolute_error(song_profile, selected_songs['tempo'])
     
-    # Plot the target profile
-    fig, ax = plt.subplots(figsize=(5,5))
-    ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
-    ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
-    ax.set_ylabel("Tempo")
-    ax.set_xlabel("Song Number")
-    ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
-    ax.legend()
+#     # Plot the target profile
+#     fig, ax = plt.subplots(figsize=(5,5))
+#     ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
+#     ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
+#     ax.set_ylabel("Tempo")
+#     ax.set_xlabel("Song Number")
+#     ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
+#     ax.legend()
 
-    # Convert the target profile image to a b64 byte string
-    cover_image_b64: bytes | None = None
-    with io.BytesIO() as buffer:
-        fig.savefig(buffer, format='jpeg')
+#     # Convert the target profile image to a b64 byte string
+#     cover_image_b64: bytes | None = None
+#     with io.BytesIO() as buffer:
+#         fig.savefig(buffer, format='jpeg')
         
-        # Check if the buffer size is within the limit (256 KB)
-        if buffer.tell() <= 256 * 1024:
-            print("\n\nSetting cover image")
-            buffer.seek(0)  # Reset buffer position to start
-            cover_image_b64 = base64.b64encode(buffer.getvalue())
+#         # Check if the buffer size is within the limit (256 KB)
+#         if buffer.tell() <= 256 * 1024:
+#             print("\n\nSetting cover image")
+#             buffer.seek(0)  # Reset buffer position to start
+#             cover_image_b64 = base64.b64encode(buffer.getvalue())
         
             
-# -------------------------------------------------------------------------------------------------
-# Save the Playlist
-# -------------------------------------------------------------------------------------------------   
+# # -------------------------------------------------------------------------------------------------
+# # Save the Playlist
+# # -------------------------------------------------------------------------------------------------   
         
-    if input("Save playlist? (y/n)").lower() != "y":
-        raise KeyboardInterrupt("Program terminated by user.")
+#     if input("Save playlist? (y/n)").lower() != "y":
+#         raise KeyboardInterrupt("Program terminated by user.")
         
-    # Set the playlist name
-    playlist_name = (
-        f"Liz's 11/28 Playlist Rearranged -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
-        f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
-    )
+#     # Set the playlist name
+#     playlist_name = (
+#         f"Liz's 11/28 Playlist Rearranged -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
+#         f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
+#     )
     
-    # Save the playlist
-    dj.save_playlist(
-        playlist_name=playlist_name,
-        playlist_songs=list(selected_songs.index),
-        cover_image_b64=cover_image_b64
-    )
+#     # Save the playlist
+#     dj.save_playlist(
+#         playlist_name=playlist_name,
+#         playlist_songs=list(selected_songs.index),
+#         cover_image_b64=cover_image_b64
+#     )
     
     
