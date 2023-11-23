@@ -86,7 +86,7 @@ if __name__ == "__main__":
 #     selected_songs = dj.match_tempo_profile(
 #         song_profile, 
 #         playlist_summary,
-#         method="supersampled_euclidean"
+#         method="upsampled_euclidean"
 #     )
     
 #     if isinstance(selected_songs, dict):

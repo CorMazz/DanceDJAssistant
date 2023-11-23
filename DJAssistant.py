@@ -198,7 +198,7 @@ class DanceDJ:
             "euclidean":
                 Minimize the vertical euclidean distances between the target profile and the 
                 achieved profile. Utilizes linear sum assignment to solve the optimization problem.
-            "supersample_euclidean":
+            "upsampled_euclidean":
                 Minimize the vertical euclidean distances between a 50x upsampled version of the 
                 target profile and the achieved profile. Utilizes linear sum assignment to solve 
                 the optimization problem. Useful when the number of songs in the profile is close 
@@ -251,11 +251,11 @@ class DanceDJ:
             # Turn the list into a DataFrame
             selected_songs = pd.concat(selected_songs, axis=1).T
             
-        elif method == "euclidean" or method == "supersampled_euclidean":
+        elif method == "euclidean" or method == "upsampled_euclidean":
             # https://stackoverflow.com/questions/39016821/minimize-total-distance-between-two-sets-of-points-in-python
             
-            if method == "supersampled_euclidean":
-                # Supersample the target profile so that we get a more faithful representation 
+            if method == "upsampled_euclidean":
+                # upsample the target profile so that we get a more faithful representation 
                 # of it
                 
 
