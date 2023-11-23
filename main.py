@@ -4,8 +4,9 @@ Created on Wed Nov 22 18:52:17 2023
 
 @author: mazzac3
 """
-
+import io
 import os
+import base64
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -72,10 +73,10 @@ if __name__ == "__main__":
 # -------------------------------------------------------------------------------------------------       
 
     # Define a target tempo profile for n songs
-    n_songs = 50
-    n_cycles = 2
-    amplitude = 22
-    mean = 92
+    n_songs = 20
+    n_cycles = 1
+    amplitude = 27
+    mean = 100
     song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
     song_profile = amplitude*np.sin(song_idx) + mean
     
@@ -86,17 +87,26 @@ if __name__ == "__main__":
     error = mean_absolute_error(song_profile, selected_songs['tempo'])
     
     # Plot the target profile
-    if 1:
-        fig, ax = plt.subplots()
-        ax.plot(song_profile, 'k--', label="Target Profile")
-        ax.plot(selected_songs['tempo'].to_numpy(), label='Achieved Profile')
-        ax.set_ylabel("Tempo")
-        ax.set_xlabel("Song Number")
-        ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
-        ax.legend()
-        fig.show()
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.plot(song_profile, 'k--', label="Target Profile")
+    ax.plot(selected_songs['tempo'].to_numpy(), label='Achieved Profile')
+    ax.set_ylabel("Tempo")
+    ax.set_xlabel("Song Number")
+    ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
+    ax.legend()
+
+    # Convert the target profile image to a b64 byte string
+    cover_image_b64: bytes | None = None
+    with io.BytesIO() as buffer:
+        fig.savefig(buffer, format='jpeg')
         
+        # Check if the buffer size is within the limit (256 KB)
+        if buffer.tell() <= 256 * 1024:
+            print("\n\nSetting cover image")
+            buffer.seek(0)  # Reset buffer position to start
+            cover_image_b64 = base64.b64encode(buffer.getvalue())
         
+            
 # -------------------------------------------------------------------------------------------------
 # Save the Playlist
 # -------------------------------------------------------------------------------------------------   
@@ -104,12 +114,17 @@ if __name__ == "__main__":
     if input("Save playlist? (y/n)").lower() != "y":
         raise KeyboardInterrupt("Program terminated by user.")
         
+    # Set the playlist name
+    playlist_name = (
+        f"{n_songs} Songs -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
+        f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
+    )
     
+    # Save the playlist
     dj.save_playlist(
-        (f"{n_songs} Songs -- {n_cycles} Cycles within ({mean - amplitude}, {mean+amplitude}) BPM -- "
-         f"MAE = {error:.2f} BPM")
-        [:100],
-        list(selected_songs.index)
+        playlist_name=playlist_name,
+        playlist_songs=list(selected_songs.index),
+        cover_image_b64=cover_image_b64
     )
     
     

@@ -5,7 +5,6 @@ Created on Wed Nov 22 18:28:03 2023
 @author: mazzac3
 """
 
-
 import scipy
 import spotipy
 import numpy as np
@@ -16,7 +15,7 @@ from spotipy.oauth2 import SpotifyOAuth
 
 class DanceDJ:
     
-    def __init__(self, scope="playlist-modify-public playlist-modify-private"):
+    def __init__(self, scope="playlist-modify-public playlist-modify-private ugc-image-upload"):
         """
         Instantiates a connection to the Spotify API. See the Spotipy documentation to learn 
         about the authorization scope.
@@ -228,6 +227,7 @@ class DanceDJ:
             playlist_name: str,
             playlist_songs: list[str],
             description: str = "Created by the DJAssistant.",
+            cover_image_b64: bytes | None = None,
             verbose: bool = True,
             ):
         
@@ -248,6 +248,9 @@ class DanceDJ:
         
         # Add the songs to the playlist
         self._sp.playlist_add_items(playlist_id, playlist_songs)
+        
+        if cover_image_b64 is not None:
+            self._sp.playlist_upload_cover_image(playlist_id, cover_image_b64)
         
         if verbose:
             print(f"Successfully created playlist: {playlist_name}")
