@@ -50,12 +50,14 @@ if __name__ == "__main__":
     
     # Parse the given playlist
     playlist_songs = parse_playlist(
-        playlist_id="https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
+        playlist_id=
+        "https://open.spotify.com/playlist/0m66VKTjiV89OJsE0NHRFa?si=ca4cd434f9a1437a" # Liz 11/28
+        #"https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
         #"https://open.spotify.com/playlist/601jBGXOfsMFZh3DfNcrVh?si=af574fa0ea364c27" # Mine
     )
     
     # Truncate down to n songs
-    playlist_songs = dict(list(playlist_songs.items())[:1000])
+    # playlist_songs = dict(list(playlist_songs.items())[:20])
 
     # Analyze the playlist
     playlist_summary = pd.concat(
@@ -73,7 +75,7 @@ if __name__ == "__main__":
 # -------------------------------------------------------------------------------------------------       
 
     # Define a target tempo profile for n songs
-    n_songs = 20
+    n_songs = len(playlist_summary)
     n_cycles = 1
     amplitude = 27
     mean = 100
@@ -81,15 +83,23 @@ if __name__ == "__main__":
     song_profile = amplitude*np.sin(song_idx) + mean
     
     # Match the profile with songs
-    selected_songs = dj.match_tempo_profile(song_profile, playlist_summary)
+    selected_songs = dj.match_tempo_profile(
+        song_profile, 
+        playlist_summary,
+        method="supersampled_euclidean"
+    )
     
+    if isinstance(selected_songs, dict):
+        song_profile = song_profile[selected_songs['profile_indices']]
+        selected_songs = selected_songs['selected_songs']
+        
     # Quantify the error
     error = mean_absolute_error(song_profile, selected_songs['tempo'])
     
     # Plot the target profile
     fig, ax = plt.subplots(figsize=(5,5))
-    ax.plot(song_profile, 'k--', label="Target Profile")
-    ax.plot(selected_songs['tempo'].to_numpy(), label='Achieved Profile')
+    ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
+    ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
     ax.set_ylabel("Tempo")
     ax.set_xlabel("Song Number")
     ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
@@ -116,7 +126,7 @@ if __name__ == "__main__":
         
     # Set the playlist name
     playlist_name = (
-        f"{n_songs} Songs -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
+        f"Liz's 11/28 Playlist Rearranged -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
         f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
     )
     

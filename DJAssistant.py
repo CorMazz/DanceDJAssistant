@@ -5,12 +5,14 @@ Created on Wed Nov 22 18:28:03 2023
 @author: mazzac3
 """
 
-import scipy
 import spotipy
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from spotipy.oauth2 import SpotifyOAuth
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
+
 
 
 class DanceDJ:
@@ -153,9 +155,9 @@ class DanceDJ:
             min_tempo, max_tempo = adjust_tempo
             
             # Add a flag for if the tempo was adjusted
-            summary['tempo_adjustment_factor'] = np.float16(1)
-            summary.loc[summary['tempo'] < min_tempo, 'tempo_adjustment_factor'] = np.float16(2)
-            summary.loc[summary['tempo'] > max_tempo, 'tempo_adjustment_factor'] = np.float16(0.5)
+            summary['tempo_adjustment_factor'] = 1.0
+            summary.loc[summary['tempo'] < min_tempo, 'tempo_adjustment_factor'] = 2
+            summary.loc[summary['tempo'] > max_tempo, 'tempo_adjustment_factor'] = 0.5
            
             # Fit the tempos to the correct range
             summary.loc[summary['tempo'] < min_tempo, "tempo"] *= 2
@@ -170,10 +172,11 @@ class DanceDJ:
     def match_tempo_profile(
             self, 
             tempo_profile: np.ndarray, 
-            song_summary_df: pd.DataFrame
+            song_summary_df: pd.DataFrame,
+            method: str = "naive",
             ) -> pd.DataFrame:
         """
-        Deterministically select songs from a given DataFrame such that the tempo of the songs 
+        Select songs from a given DataFrame such that the tempo of the songs 
         matches a given tempo profile.
 
         Parameters
@@ -182,6 +185,26 @@ class DanceDJ:
             A 1D array of target tempo values for each song.
         song_summary_df : pd.DataFrame
             A DataFrame with a "tempo" column which contains the BPM information for the song.
+        method : str
+            Determine what method to use to approximate the playlist. 
+            
+            "naive":
+                Deterministically select songs by moving 1 target BPM at a time and searching
+                through the entire song_summary_df for the song that minimizes the error between 
+                the target BPM and the song's BPM. Thus, if there are a limited number of songs in 
+                the song_summary_df, the beginning of the playlist is more likely to accurately 
+                represent the target profile than the end of the playlist.
+            "euclidean":
+                Minimize the vertical euclidean distances between the target profile and the 
+                achieved profile. Utilizes linear sum assignment to solve the optimization problem.
+            "supersample_euclidean":
+                Minimize the vertical euclidean distances between a 50x upsampled version of the 
+                target profile and the achieved profile. Utilizes linear sum assignment to solve 
+                the optimization problem. Useful when the number of songs in the profile is close 
+                to the number of songs in the song_summary_df to get a qualitative representation 
+                of what the target profile generally looks like. (ie, when rearranging an existing
+                playlist).
+                
 
         Raises
         ------
@@ -193,29 +216,65 @@ class DanceDJ:
         -------
         selected_songs : pd.DataFrame
             The subset of songs from the original DataFrame ordered to match the profile. 
-
         """
         
         # Validate the inputs
         if len(tempo_profile) > len(song_summary_df):
             raise ValueError("There are not enough songs to match this profile. Add more songs.")
         
-        # Initialize a list
-        selected_songs = []
-        
-        # Loop through each position of the tempo profile and find the closest song
-        for bpm in tempo_profile:
-            min_idx = np.argmin(abs(song_summary_df['tempo'] - bpm))
+        if method == "naive":
             
-            # Save the closest song
-            selected_songs.append(song_summary_df.iloc[min_idx, :])
+            # Initialize a list
+            selected_songs = []
             
-            # Drop the closest song so that it isn't re-selected
-            song_summary_df = song_summary_df.drop(index=song_summary_df.index[min_idx])
+            # Loop through each position of the tempo profile and find the closest song
+            for bpm in tempo_profile:
+                min_idx = np.argmin(abs(song_summary_df['tempo'] - bpm))
+                
+                # Save the closest song
+                selected_songs.append(song_summary_df.iloc[min_idx, :])
+                
+                # Drop the closest song so that it isn't re-selected
+                song_summary_df = song_summary_df.drop(index=song_summary_df.index[min_idx])
+                
+            # Turn the list into a DataFrame
+            selected_songs = pd.concat(selected_songs, axis=1).T
             
-        # Turn the list into a DataFrame
-        selected_songs = pd.concat(selected_songs, axis=1).T
-        
+        elif method == "euclidean" or method == "supersampled_euclidean":
+            # https://stackoverflow.com/questions/39016821/minimize-total-distance-between-two-sets-of-points-in-python
+            
+            if method == "supersampled_euclidean":
+                # Supersample the target profile so that we get a more faithful representation 
+                # of it
+                
+
+                
+                n_songs = len(tempo_profile)
+                
+                scale_factor = 50
+                # if you don't cut off the last 'scale_factor' points, it looks weird. idk why
+                tempo_profile = np.interp(
+                    x=np.linspace(0, n_songs, n_songs*scale_factor),
+                    xp=np.arange(n_songs),
+                    fp=tempo_profile,
+                )[:-scale_factor]
+                
+
+            # Calculate the 'cost' (euclidean distance which equals absolute error) of each
+            # combination of points
+            
+            cost = cdist(
+                tempo_profile.reshape(-1,1),
+                song_summary_df['tempo'].to_numpy().reshape(-1,1), 
+                metric="euclidean",
+            )
+            
+            # Optimize the song assignment
+            _, song_idxs = linear_sum_assignment(cost)
+            
+            # Set the song assignment
+            selected_songs = song_summary_df.iloc[song_idxs, :]
+            
         return selected_songs
 
 # -------------------------------------------------------------------------------------------------
