@@ -205,10 +205,6 @@ class DanceDJ:
                 to the number of songs in the song_summary_df to get a qualitative representation 
                 of what the target profile generally looks like. (ie, when rearranging an existing
                 playlist).
-        plot_results : bool
-            Create a Matplotlib figure of the target profile and the achieved profile. If the 
-            target profile is the same length as the song_summary_df, also plots the original
-            song profile. 
 
         Raises
         ------
@@ -220,11 +216,18 @@ class DanceDJ:
         -------
         selected_songs : pd.DataFrame
             The subset of songs from the original DataFrame ordered to match the profile. 
-        
-        results : dict[pd.DataFrame, plt.Figure]
-            A dictionary containing the selected_songs DataFrame and the Figure object if 
-            plot_results is set to True. 
+
         """
+        
+        # plot_results : bool
+        #     Create a Matplotlib figure of the target profile and the achieved profile. If the 
+        #     target profile is the same length as the song_summary_df, also plots the original
+        #     song profile. 
+                
+        # results : dict[pd.DataFrame, plt.Figure]
+        #     A dictionary containing the selected_songs DataFrame and the Figure object if 
+        #     plot_results is set to True. 
+
         
         # Validate the inputs
         if len(tempo_profile) > len(song_summary_df):
