@@ -4,9 +4,9 @@ Created on Wed Nov 22 18:52:17 2023
 
 @author: mazzac3
 """
-import io
+
+
 import os
-import base64
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -23,7 +23,7 @@ if __name__ == "__main__":
     
     os.environ["SPOTIPY_CLIENT_ID"] = "b6eaa41c44d44f919fc2f49cba43767a"
     os.environ["SPOTIPY_CLIENT_SECRET"] = "7b39402661b44941b2d8a2b1209a3797"
-    os.environ["SPOTIPY_REDIRECT_URI"] = "http://localhost"
+    os.environ["SPOTIPY_REDIRECT_URI"] = "http://localhost:8080"
     
     # Create a DanceDJ object
     dj = DanceDJ()
@@ -74,48 +74,37 @@ if __name__ == "__main__":
 # Match Profile 
 # -------------------------------------------------------------------------------------------------       
 
-#     # Define a target tempo profile for n songs
-#     n_songs = len(playlist_summary)
-#     n_cycles = 1
-#     amplitude = 27
-#     mean = 100
-#     song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
-#     song_profile = amplitude*np.sin(song_idx) + mean
+    # Define a target tempo profile for n songs
+    n_songs = len(playlist_summary)
+    n_cycles = 1
+    amplitude = 27
+    mean = 100
+    song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
+    song_profile = amplitude*np.sin(song_idx) + mean
     
-#     # Match the profile with songs
-#     selected_songs = dj.match_tempo_profile(
-#         song_profile, 
-#         playlist_summary,
-#         method="upsampled_euclidean"
-#     )
+    # Match the profile with songs
+    selected_songs = dj.match_tempo_profile(
+        song_profile, 
+        playlist_summary,
+        method="upsampled_euclidean"
+    )
     
-#     if isinstance(selected_songs, dict):
-#         song_profile = song_profile[selected_songs['profile_indices']]
-#         selected_songs = selected_songs['selected_songs']
+    if isinstance(selected_songs, dict):
+        song_profile = song_profile[selected_songs['profile_indices']]
+        selected_songs = selected_songs['selected_songs']
         
-#     # Quantify the error
-#     error = mean_absolute_error(song_profile, selected_songs['tempo'])
+    # Quantify the error
+    error = mean_absolute_error(song_profile, selected_songs['tempo'])
     
-#     # Plot the target profile
-#     fig, ax = plt.subplots(figsize=(5,5))
-#     ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
-#     ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
-#     ax.set_ylabel("Tempo")
-#     ax.set_xlabel("Song Number")
-#     ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
-#     ax.legend()
+    # Plot the target profile
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
+    ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
+    ax.set_ylabel("Tempo")
+    ax.set_xlabel("Song Number")
+    ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
+    ax.legend()
 
-#     # Convert the target profile image to a b64 byte string
-#     cover_image_b64: bytes | None = None
-#     with io.BytesIO() as buffer:
-#         fig.savefig(buffer, format='jpeg')
-        
-#         # Check if the buffer size is within the limit (256 KB)
-#         if buffer.tell() <= 256 * 1024:
-#             print("\n\nSetting cover image")
-#             buffer.seek(0)  # Reset buffer position to start
-#             cover_image_b64 = base64.b64encode(buffer.getvalue())
-        
             
 # # -------------------------------------------------------------------------------------------------
 # # Save the Playlist

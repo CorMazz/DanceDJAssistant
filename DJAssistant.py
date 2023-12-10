@@ -5,10 +5,13 @@ Created on Wed Nov 22 18:28:03 2023
 @author: mazzac3
 """
 
+import io
+import base64
 import spotipy
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from spotipy.oauth2 import SpotifyOAuth
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
@@ -295,7 +298,7 @@ class DanceDJ:
             playlist_name: str,
             playlist_songs: list[str],
             description: str = "Created by the DJAssistant.",
-            cover_image_b64: bytes | None = None,
+            cover_image_b64: bytes | plt.Figure | None = None,
             verbose: bool = True,
             ):
         """
@@ -310,8 +313,10 @@ class DanceDJ:
             A list of strings of unique Spotify song identifiers (URLs, URIs, IDs). Not names.
         description : str, optional
             A description for the playlist. The default is "Created by the DJAssistant.".
-        cover_image_b64 : bytes | None, optional
-            A b64 byte string containing the image. Max size is 256 kB. The default is None.
+        cover_image_b64 : bytes | plt.Figure | None, optional
+            A b64 byte string containing the image, or a Matplotlib figure that will be converted
+            to a b64 byte string. Ideally, make the figure square. 5x5 seems to work well. The max
+            size is 256 kB. The default is None.
         verbose : bool, optional
             Print status to console. The default is True.
 
@@ -339,7 +344,22 @@ class DanceDJ:
         # Add the songs to the playlist
         self._sp.playlist_add_items(playlist_id, playlist_songs)
         
+        # Upload the cover image
         if cover_image_b64 is not None:
+            
+            # Check if it is a matplotlib figure that needs to be converted
+            if isinstance(cover_image_b64, plt.Figure):
+                with io.BytesIO() as buffer:
+                    cover_image_b64.savefig(buffer, format='jpeg')
+                    
+                    # Check if the buffer size is within the limit (256 KB)
+                if buffer.tell() >= 256 * 1024:
+                    raise OverflowError("The given figure is larger than 256 kB.")
+               
+                buffer.seek(0)  # Reset buffer position to start
+                cover_image_b64 = base64.b64encode(buffer.getvalue()) # Enconde the figure
+            
+            # upload the figure
             self._sp.playlist_upload_cover_image(playlist_id, cover_image_b64)
         
         if verbose:
