@@ -258,12 +258,10 @@ class DanceDJ:
                 # upsample the target profile so that we get a more faithful representation 
                 # of it
                 
-
-                
                 n_songs = len(tempo_profile)
                 
                 scale_factor = 50
-                # if you don't cut off the last 'scale_factor' points, it looks weird. idk why
+                # if you don't cut off the last 'scale_factor' # of points, it looks weird. idk why
                 tempo_profile = np.interp(
                     x=np.linspace(0, n_songs, n_songs*scale_factor),
                     xp=np.arange(n_songs),
@@ -300,6 +298,28 @@ class DanceDJ:
             cover_image_b64: bytes | None = None,
             verbose: bool = True,
             ):
+        """
+        Save the playlist by uploading it to your Spotify account. Can optionally add a playlist
+        description and cover image.
+
+        Parameters
+        ----------
+        playlist_name : str
+            The name of the playlist. There is a 100 character limit.
+        playlist_songs : list[str]
+            A list of strings of unique Spotify song identifiers (URLs, URIs, IDs). Not names.
+        description : str, optional
+            A description for the playlist. The default is "Created by the DJAssistant.".
+        cover_image_b64 : bytes | None, optional
+            A b64 byte string containing the image. Max size is 256 kB. The default is None.
+        verbose : bool, optional
+            Print status to console. The default is True.
+
+        Returns
+        -------
+        None.
+
+        """
         
         # Validate the inputs
         if len(playlist_name) > 100:
