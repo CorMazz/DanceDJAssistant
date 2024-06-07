@@ -3,6 +3,11 @@
 Created on Wed Nov 22 18:28:03 2023
 
 @author: mazzac3
+
+TODO:
+    
+    Add the capability to create interactive plotly plots describing the playlist. Hovertext containing key info about
+    the songs.
 """
 
 import io
@@ -154,17 +159,7 @@ class DanceDJ:
             
             
         if adjust_tempo is not None:
-            # Unpack the bounds
-            min_tempo, max_tempo = adjust_tempo
-            
-            # Add a flag for if the tempo was adjusted
-            summary['tempo_adjustment_factor'] = 1.0
-            summary.loc[summary['tempo'] < min_tempo, 'tempo_adjustment_factor'] = 2
-            summary.loc[summary['tempo'] > max_tempo, 'tempo_adjustment_factor'] = 0.5
-           
-            # Fit the tempos to the correct range
-            summary.loc[summary['tempo'] < min_tempo, "tempo"] *= 2
-            summary.loc[summary['tempo'] > max_tempo, "tempo"] /= 2
+            summary = self.adjust_tempo(summary, adjust_tempo)
             
         return summary
         
@@ -353,11 +348,11 @@ class DanceDJ:
                     cover_image_b64.savefig(buffer, format='jpeg')
                     
                     # Check if the buffer size is within the limit (256 KB)
-                if buffer.tell() >= 256 * 1024:
-                    raise OverflowError("The given figure is larger than 256 kB.")
+                    if buffer.tell() >= 256 * 1024:
+                        raise OverflowError("The given figure is larger than 256 kB.")
                
-                buffer.seek(0)  # Reset buffer position to start
-                cover_image_b64 = base64.b64encode(buffer.getvalue()) # Enconde the figure
+                    buffer.seek(0)  # Reset buffer position to start
+                    cover_image_b64 = base64.b64encode(buffer.getvalue()) # Encode the figure
             
             # upload the figure
             self._sp.playlist_upload_cover_image(playlist_id, cover_image_b64)
@@ -365,6 +360,22 @@ class DanceDJ:
         if verbose:
             print(f"Successfully created playlist: {playlist_name}")
         
+# -------------------------------------------------------------------------------------------------
+# Adjust Tempo
+# -------------------------------------------------------------------------------------------------   
         
 
-    
+    def adjust_tempo(self, playlist: pd.DataFrame, tempo_bounds: tuple[int, int]) -> pd.DataFrame:
+        
+        # Unpack the bounds
+        min_tempo, max_tempo = tempo_bounds
+        
+        # Add a flag for if the tempo was adjusted
+        playlist['tempo_adjustment_factor'] = 1.0
+        playlist.loc[playlist['tempo'] < min_tempo, 'tempo_adjustment_factor'] = 2
+        playlist.loc[playlist['tempo'] > max_tempo, 'tempo_adjustment_factor'] = 0.5
+       
+        # Fit the tempos to the correct range
+        playlist.loc[playlist['tempo'] < min_tempo, "tempo"] *= 2
+        playlist.loc[playlist['tempo'] > max_tempo, "tempo"] /= 2
+        return playlist

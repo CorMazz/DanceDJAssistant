@@ -52,8 +52,11 @@ if __name__ == "__main__":
     playlist_songs = parse_playlist(
         playlist_id=
         # "https://open.spotify.com/playlist/0m66VKTjiV89OJsE0NHRFa?si=ca4cd434f9a1437a" # Liz 11/28
-        "https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
+        # "https://open.spotify.com/playlist/5i5aRhCzljuixCrSES3pYH?si=ecc1f0a28c344516" # Sarah
         #"https://open.spotify.com/playlist/601jBGXOfsMFZh3DfNcrVh?si=af574fa0ea364c27" # Mine
+        # "https://open.spotify.com/playlist/7DFID0tvfRns1xbMgpsVIO?si=c3e587f750c64a35" # Liz 4/2
+        # "https://open.spotify.com/playlist/0nkHtrospRSZaxzdWP08iZ" # Cory's Copy of Liz 4/2
+        "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTUe4sXAuwgnsMw&pi=G1Ml4W56TOize"  # Cory's Copy of Liz 5/14
     )
     
     # Truncate down to n songs
@@ -70,17 +73,20 @@ if __name__ == "__main__":
         ]
     )
     
+    # Adjust the tempo (out here because I don't want to re-analyze all those songs since spotipy is timing out)
+    playlist_summary = dj.adjust_tempo(playlist_summary, (60, 130))
+    
 # -------------------------------------------------------------------------------------------------
 # Match Profile 
 # -------------------------------------------------------------------------------------------------       
 
     # Define a target tempo profile for n songs
     n_songs = len(playlist_summary)
-    n_cycles = 1
-    amplitude = 27
-    mean = 100
+    n_cycles = 5
+    amplitude = 23
+    mean = 97
     song_idx = np.linspace(0, n_cycles*2*np.pi, n_songs)
-    song_profile = amplitude*np.sin(song_idx) + mean
+    song_profile = amplitude*np.sin(song_idx + 5) + mean
     
     # Match the profile with songs
     selected_songs = dj.match_tempo_profile(
@@ -100,30 +106,30 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(figsize=(5,5))
     ax.plot(song_profile, 'k--', marker="o", label="Target Profile")
     ax.plot(selected_songs['tempo'].to_numpy(), marker="*", label='Achieved Profile')
-    ax.set_ylabel("Tempo")
+    ax.set_ylabel("Tempo (BPM)")
     ax.set_xlabel("Song Number")
     ax.set_title(f"Target Song Profile vs. Achieved Profile\n MAE = {error:.2f} BPM")
     ax.legend()
 
             
-# # -------------------------------------------------------------------------------------------------
-# # Save the Playlist
-# # -------------------------------------------------------------------------------------------------   
+# -------------------------------------------------------------------------------------------------
+# Save the Playlist
+# -------------------------------------------------------------------------------------------------   
         
-#     if input("Save playlist? (y/n)").lower() != "y":
-#         raise KeyboardInterrupt("Program terminated by user.")
+    if input("Save playlist? (y/n)").lower() != "y":
+        raise KeyboardInterrupt("Program terminated by user.")
         
-#     # Set the playlist name
-#     playlist_name = (
-#         f"Liz's 11/28 Playlist Rearranged -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
-#         f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
-#     )
+    # Set the playlist name
+    playlist_name = (
+        f"5/14 -- {n_cycles} Cycle{'s' if n_cycles != 1 else ''} -- ({mean - amplitude}"
+        f", {mean+amplitude}) BPM -- MAE = {error:.2f} BPM"
+    )
     
-#     # Save the playlist
-#     dj.save_playlist(
-#         playlist_name=playlist_name,
-#         playlist_songs=list(selected_songs.index),
-#         cover_image_b64=cover_image_b64
-#     )
+    # Save the playlist
+    dj.save_playlist(
+        playlist_name=playlist_name,
+        playlist_songs=list(selected_songs.index),
+        cover_image_b64=fig,
+    )
     
     
