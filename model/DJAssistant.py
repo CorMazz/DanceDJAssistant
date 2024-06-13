@@ -10,36 +10,75 @@ TODO:
     the songs.
 """
 
+import os
 import io
 import base64
 import spotipy
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from pathlib import Path
 import matplotlib.pyplot as plt
 from spotipy.oauth2 import SpotifyOAuth
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
-
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class DanceDJ:
     
-    def __init__(self, scope="playlist-modify-public playlist-modify-private ugc-image-upload"):
+    def __init__(
+            self, 
+            scope="playlist-modify-public playlist-modify-private ugc-image-upload", 
+            retry_config: dict | None = None,
+            # db_url: str | os.PathLike | None = None,
+        ):
         """
         Instantiates a connection to the Spotify API. See the Spotipy documentation to learn 
         about the authorization scope.
+        
+        retry_config : dict, optional
+            A dict of kwargs fed to the Tenacity retry decorator wrapping Spotipy's finnicky audio_analysis method. 
+            Default is None, which leads to the following retry settings: 
+                {
+                    'stop': stop_after_attempt(3),
+                    'wait': wait_exponential(multiplier=1, min=4, max=10)
+                }
         """
+        # db_url : str | False | None, optional
+        #     A url for the SQL database to connect to. The database will be used as a persistent cache of song 
+        #     information to limit calls to the Spotipy API. 
+        #         If a string | os.PathLike:
+        #             Connects to the existing database at this URL and adds a table. Once the analyze songs method is 
+        #             called. If there is no existing database, creates a new one.
+        #         If None: 
+        #             Does not connect to a database.
+
         
         self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
         
-###################################################################################################
+        if not isinstance(retry_config, (dict, type(None))):
+            raise TypeError(f"retry_config is of type {type(retry_config)} when it should be a dict or None.")
+        self.retry_config = retry_config or {
+            'stop': stop_after_attempt(3),
+            'wait': wait_exponential(multiplier=1, min=4, max=10)
+        }
+        
+        # if not isinstance(db_url, (str, os.PathLike, type(None))):
+        #     raise TypeError(f"db_url is of type {type(db_url)} when it should be a str, os.PathLike, or None.")
+        # elif isinstance(db_url, str):
+        #     db_url = Path(db_url)
+            
+        # if db_url is not None:
+            
+        
+########################################################################################################################
 # Primary Methods
-###################################################################################################
+########################################################################################################################
 
-# -------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Parse Playlist
-# -------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 
     def parse_playlist(self, playlist_id: str, max_tracks: int = 5e3):
         """
@@ -95,9 +134,17 @@ class DanceDJ:
         self, 
         song_ids: list, 
         song_names: list | None = None,
-        adjust_tempo: tuple[int, int] | None = (60, 140),
-        progress_bar: bool = True
-        ) -> pd.DataFrame:
+        adjust_tempo: tuple[int, int] | None = (60, 130),
+        desired_info: tuple[str] = (
+            "tempo",
+            "tempo_confidence",
+            "key",
+            "key_confidence",
+            "time_signature", 
+            "time_signature_confidence"
+        ),
+        progress_bar: bool = True,
+        ) -> pd.DataFrame | str:
         """
         Given a list of song_ids, analyzes the songs and returns a DataFrame with important 
         information analyzed from the songs.
@@ -114,9 +161,23 @@ class DanceDJ:
             Given a tuple of (slowest_tempo, fastest_tempo), check to ensure that all songs tempos
             analyzed fall within that range, and if they do not, double them or halve them to 
             fit the range. This relies on the assumption that all of the songs truly are danceable,
-            and that their tempos fall within the given range. The default is (60, 140).
+            and that their tempos fall within the given range. The default is (60, 130).
+        desired_info: tuple[str], optional
+            The names of the columns to keep in the returned DataFrame. Columns to select from are provided by the 
+            Spotipy API. https://developer.spotify.com/documentation/web-api/reference/get-audio-analysis. 
+            The default is
+            (
+                "tempo",
+                "tempo_confidence",
+                "key",
+                "key_confidence",
+                "time_signature", 
+                "time_signature_confidence"
+            )
+        
         progress_bar : bool, optional
             Show a progress bar or not. The default is True.
+
 
         Returns
         -------
@@ -132,17 +193,6 @@ class DanceDJ:
         analyses = {song_id: self._sp.audio_analysis(song_id) 
                     for song_id in iterator}
             
-            
-        # This should be an input to the function
-        desired_info = [
-            "tempo",
-            "tempo_confidence",
-            "key",
-            "key_confidence",
-            "time_signature", 
-            "time_signature_confidence"
-        ]    
-
         # Get a summary of the information for all of these songs in a single dataframe
         summary = pd.concat(
             {info_type: 
@@ -162,10 +212,13 @@ class DanceDJ:
             summary = self.adjust_tempo(summary, adjust_tempo)
             
         return summary
-        
-# -------------------------------------------------------------------------------------------------
+    
+    # TODO: Add a function which analyzes the playlist and gives a summary of it's stats, such as total length, bpm 
+    # quartiles, a bpm histogram, 
+    
+# ----------------------------------------------------------------------------------------------------------------------
 # Match Profile 
-# -------------------------------------------------------------------------------------------------   
+# ----------------------------------------------------------------------------------------------------------------------
     
     def match_tempo_profile(
             self, 
@@ -360,9 +413,9 @@ class DanceDJ:
         if verbose:
             print(f"Successfully created playlist: {playlist_name}")
         
-# -------------------------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Adjust Tempo
-# -------------------------------------------------------------------------------------------------   
+# ----------------------------------------------------------------------------------------------------------------------
         
 
     def adjust_tempo(self, playlist: pd.DataFrame, tempo_bounds: tuple[int, int]) -> pd.DataFrame:
@@ -379,3 +432,193 @@ class DanceDJ:
         playlist.loc[playlist['tempo'] < min_tempo, "tempo"] *= 2
         playlist.loc[playlist['tempo'] > max_tempo, "tempo"] /= 2
         return playlist
+    
+# -------------------------------------------------------------------------------------------------
+# Robust Audio Analysis
+# -------------------------------------------------------------------------------------------------  
+    
+    def __get_retry_decorator(self):
+        """Enables us to have the user feed in retry options via kwargs to the DanceDJ constructor."""
+        return retry(**self.retry_config)
+
+    def robust_audio_analysis(self, song_id):
+        """Wraps Spotipy's audio_analysis method with a Tenacity decorator that makes it retry polling the API if it 
+        times out. The retry parameters can be set in the DanceDJ constructor."""
+        @self.__get_retry_decorator()
+        def _fetch():
+            return self._sp.audio_analysis(song_id)
+        return _fetch()
+    
+# ----------------------------------------------------------------------------------------------------------------------
+# Generate Sinusoidal Profile
+# ----------------------------------------------------------------------------------------------------------------------
+
+    def generate_sinusoidal_profile(
+            self, 
+            tempo_bounds: tuple[int, int],
+            n_cycles: float, 
+            horizontal_shift: float, 
+            n_songs: int
+        ) -> np.ndarray:
+        """
+        Define a sinusoidal tempo profile for a given number of songs.
+    
+        This function generates a sinusoidal profile of target tempos for a given 
+        number of songs. The sinusoidal function is defined by the amplitude and 
+        mean of the tempo bounds, and it is modulated over a specified number of 
+        cycles with an optional horizontal shift.
+    
+        Parameters
+        ----------
+        tempo_bounds : tuple of int
+            A tuple containing the minimum and maximum tempo values.
+        n_cycles : float
+            The number of cycles over which the sinusoidal profile should repeat.
+        horizontal_shift : float
+            The horizontal shift applied to the sinusoidal function.
+        n_songs : int
+            The number of songs in the generated profile.
+    
+        Returns
+        -------
+        np.ndarray
+            An array containing the sinusoidal tempo profile.
+        """
+        # Define a target tempo profile for n songs
+        amplitude = tempo_bounds[1] - tempo_bounds[0]
+        mean = np.mean(tempo_bounds)
+        song_idx = np.linspace(0, 1, n_songs)
+        return amplitude*np.sin( n_cycles * 2 * np.pi * (song_idx + horizontal_shift*(n_songs/n_cycles))) + mean
+    
+# ----------------------------------------------------------------------------------------------------------------------
+# Plot Profile
+# ----------------------------------------------------------------------------------------------------------------------
+
+    def plot_profile(
+            self, 
+            profile: np.ndarray,
+            fig_kwargs: dict | None = None,
+            ax_plot_kwargs: dict | None = None,
+        ) -> (plt.Figure, plt.Axes):
+        """
+        Plot the target tempo profile.
+    
+        This function creates a plot of the given target tempo profile using 
+        matplotlib. The plot can be customized with additional keyword arguments 
+        for the figure and axes.
+    
+        Parameters
+        ----------
+        profile : np.ndarray
+            An array containing the tempo profile to be plotted.
+        fig_kwargs : dict or None, optional
+            A dictionary of keyword arguments to be passed to `plt.subplots` 
+            for figure customization. Default is None.
+        ax_plot_kwargs : dict or None, optional
+            A dictionary of keyword arguments to be passed to `ax.plot` 
+            for axis customization. Default is None.
+    
+        Returns
+        -------
+        fig : plt.Figure
+            The matplotlib figure object containing the plot.
+        ax : plt.Axes
+            The matplotlib axes object containing the plot.
+    
+        Examples
+        --------
+        >>> dj = DanceDJ()
+        >>> profile = dj.define_sinusoidal_profile((60, 120), 3, 0.5)
+        >>> fig, ax = dj.plot_profile(profile)
+        >>> plt.show()
+    
+        Notes
+        -----
+        The function uses default plot settings, which can be overridden by 
+        providing `fig_kwargs` and `ax_plot_kwargs`. If no customization is 
+        provided, the plot will use the default settings:
+        
+        - `fig_kwargs`: empty dictionary
+        - `ax_plot_kwargs`: {'label': 'Target Profile', 'color': 'k', 'marker': 'o', 'linestyle': '--'}
+    
+        The function also validates the types of the input variables before 
+        proceeding with plotting.
+        """
+        
+        self.__validate_variable_types([
+            ("profile", profile, np.ndarray),
+            ("fig_kwargs", fig_kwargs, (dict, type(None))),
+            ("ax_plot_kwargs", ax_plot_kwargs, (dict, type(None)))
+        ])
+        
+        fig_kwargs = fig_kwargs or {}
+        
+        # Define default ax_plot_kwargs and update with function inputs
+        ax_plot_kwargs = dict(label="Target Profile", color="k", marker="o", linestyle="--") | (ax_plot_kwargs or {})
+        
+        # Plot the target profile
+        fig, ax = plt.subplots(**fig_kwargs)
+        ax.plot(profile, **ax_plot_kwargs)
+        ax.set_ylabel("Tempo (BPM)")
+        ax.set_xlabel("Song Number")
+        ax.set_title("Target Song Profile")
+        ax.legend()
+        
+        return fig, ax
+        
+# ----------------------------------------------------------------------------------------------------------------------
+# Validate Variable Types
+# ----------------------------------------------------------------------------------------------------------------------
+        
+    @staticmethod
+    def __validate_variable_types(variables):
+        """
+        Validates the types of variables against their allowed types.
+    
+        Parameters
+        ----------
+        variables : list of tuples
+            A list where each tuple contains:
+            - variable_name : str
+                The name of the variable to be checked.
+            - variable : any
+                The variable to be checked.
+            - allowed_types : tuple of types
+                The types that the variable is allowed to be.
+            - error_message : str, optional
+                A custom error message to be used if the variable is not of the allowed types.
+    
+        Raises
+        ------
+        TypeError
+            If a variable is not of the allowed types.
+    
+        Examples
+        --------
+        #>>> import numpy as np
+        #>>> data = np.array([1, 2, 3])
+        #>>> validate_variable_types([('data', data, (np.ndarray, type(None)))])
+    
+        #>>> validate_variable_types([('data', data, (list, type(None)))])
+        Traceback (most recent call last):
+            ...
+        TypeError: data is of type <class 'numpy.ndarray'> when it should be one of (<class 'list'>, <class 'NoneType'>).
+    
+        #>>> validate_variable_types([('data', data, (list, type(None)), "CUSTOM ERROR MESSAGE HERE.")])
+        Traceback (most recent call last):
+            ...
+        TypeError: data is of type <class 'numpy.ndarray'> CUSTOM ERROR MESSAGE HERE.
+        """
+        for entry in variables:
+            variable_name = entry[0]
+            var = entry[1]
+            allowed_types = entry[2]
+            error_message = entry[3] if len(entry) > 3 else None
+    
+            if not isinstance(var, allowed_types):
+                if error_message:
+                    raise TypeError(f"{variable_name} is of type {type(var)} {error_message}")
+                else:
+                    raise TypeError(
+                        f"{variable_name} is of type {type(var)} when it should be one of {allowed_types}."
+                    )

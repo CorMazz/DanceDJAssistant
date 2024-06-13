@@ -1,0 +1,12 @@
+{% extends "base.html" %} 
+{% block title %}Playlist Statistics{% endblock %} 
+{% block content %}
+
+<h1>{{link}}</h1>
+{{processed_playlist | safe}}
+
+<form action="{{ url_for('playlist_analyzer.define_profile') }}" method="POST">
+    <button type="submit">Continue to Define Profile</button>
+</form>
+
+{% endblock %}

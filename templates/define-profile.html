@@ -1,0 +1,38 @@
+{% extends "base.html" %} 
+{% block title %}Define Profile{% endblock %} 
+{% block content %}
+<div class="container">
+    <div class="row mt-5">
+        <div class="col text-center">
+            <h2>Sinusoidal Song Profile</h2>
+            <p>The default profile is a sinusoid. This cyclic function varies smoothly from a minimum to a maximum value.
+                The idea is to smoothly transition between song tempos without lingering at fast/slow for too long which 
+                can tire/bore dancers.
+            </p>
+            {% if profile_plot != None %}
+            <img src="data:image/png;base64,{{ profile_plot }}" alt="Profile Plot" class="img-fluid"\>
+            {% endif %}
+
+            <form method="POST">
+                <div class="form-group">
+                    <label class="text-primary font-weight-bold" for="min_bpm">Min BPM:</label>
+                    <input type="number" class="form-control" id="min_bpm" name="min_bpm" min="0" step="1" value="{{ form_data.get('min_bpm', 0) }}" required>
+                </div>
+                <div class="form-group">
+                    <label class="text-primary font-weight-bold" for="max_bpm">Max BPM:</label>
+                    <input type="number" class="form-control" id="max_bpm" name="max_bpm" min="0" step="1" value="{{ form_data.get('max_bpm', 0) }}" required>
+                </div>
+                <div class="form-group">
+                    <label class="text-primary font-weight-bold" for="n_cycles">Number of Cycles:</label>
+                    <input type="number" class="form-control" id="n_cycles" name="n_cycles" min="0" step="0.1" value="{{ form_data.get('n_cycles', 0) }}" required>
+                </div>
+                <div class="form-group">
+                    <label class="text-primary font-weight-bold" for="horizontal_shift">Horizontal Shift (in Cycles):</label>
+                    <input type="number" class="form-control" id="horizontal_shift" name="horizontal_shift" min="0" value="{{ form_data.get('horizontal_shift', 0) }}">
+                </div>
+                <button type="submit" class="btn btn-primary">Update Profile</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

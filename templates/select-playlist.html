@@ -1,0 +1,9 @@
+{% extends "base.html" %} {% block title %}Select Playlist{% endblock %} {% block content
+%}
+<h1 align="center">Enter Playlist Link</h1>
+<form method="POST">
+    <label for="playlist-link">Playlist Link:</label>
+    <input type="url" id="playlist-link" name="playlist-link" required>
+    <button type="submit">Process Playlist</button>
+</form>
+{% endblock %}

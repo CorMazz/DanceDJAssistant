@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, render_template
 from flask_sqlalchemy import SQLAlchemy
 from pathlib import Path
 
@@ -36,7 +36,11 @@ def create_app(test_config=None):
     
     @app.route('/dev')
     def dev():
-        return "<h1>This is a development test page. Guess the website is up :)</h1>"
+        return render_template("base.html")
+    
+    # Register pages
+    from model_controller import playlist_analyzer
+    app.register_blueprint(playlist_analyzer)
     
     return app
 
@@ -44,7 +48,7 @@ def create_app(test_config=None):
 #
 ########################################################################################################################
 
-def create_database(app: Flask, db_name: str):
+def create_database(app: Flask):
     db_path = os.path.join(app.instance_path, db_name)
     if not os.path.exists(db_path):
         db.create_all()
