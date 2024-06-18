@@ -9,7 +9,8 @@ Created on Wed Jun 12 01:09:39 2024
 
 import os
 import base64
-from io import BytesIO
+import pandas as pd
+from io import BytesIO, StringIO
 from model.DJAssistant import DanceDJ
 from flask import (Blueprint, render_template, request, flash, redirect, url_for, session)
 
@@ -73,6 +74,7 @@ def analyze_playlist():
             songs.values(),
             desired_info=(
                 "tempo",
+                "duration",
                 "key",
                 "time_signature", 
             ),
@@ -104,29 +106,46 @@ def define_profile():
         # profiles. 
         
         # TODO: Implement the ability to read a profile from a paint image. 
-        profile_plot = None
+        profile_plot, fit_playlist, rearranged_playlist = None, None, None
         
         if request.method == "POST":
-            # Read the items defined in the post request
-            if any((not request.form.get(key, False) for key in ["min_bpm", "max_bpm", "n_cycles"])):
-                flash("Values must be non-zero, positive floats/ints.", "error")
-            else:
-                profile = DanceDJ().generate_sinusoidal_profile(
-                    (int(request.form.get("min_bpm")), int(request.form.get("max_bpm"))),
-                    float(request.form.get("n_cycles")), 
-                    float(request.form.get("horizontal_shift", 0)),
-                    n_songs,
+            target_profile = DanceDJ().generate_sinusoidal_profile(
+                (int(request.form.get("min_bpm")), int(request.form.get("max_bpm"))),
+                float(request.form.get("n_cycles")), 
+                float(request.form.get("horizontal_shift", 0)),
+                n_songs,
+                n_points=n_songs*50
+            )
+            
+            # checkbox result is either None (NoneType) or str("on")
+            if (fit_playlist := request.form.get("fit_playlist")) is not None:
+                analyzed_playlist = pd.read_json(StringIO(session['processed-playlist']))
+                rearranged_playlist = DanceDJ().match_tempo_profile(
+                    target_profile,
+                    analyzed_playlist,
+                    method="euclidean"  # no need to upsample, profile is already oversampled
                 )
-                
-                fig, ax = DanceDJ().plot_profile(profile)
-                
-                # Convert the image to bytes so I can ship it off to the HTML and render it
-                figfile = BytesIO()
-                fig.savefig(figfile, format='png')
-                figfile.seek(0)  # rewind to beginning of file
+            
+            fig, ax = DanceDJ().plot_profile_matplotlib(
+                target_profile, 
+                rearranged_playlist, 
+                target_profile_kwargs=dict(markersize=4),
+                fig_kwargs=dict(figsize=(8,6)),
+            )
+            
+            # Convert the image to bytes so I can ship it off to the HTML and render it
+            figfile = BytesIO()
+            fig.savefig(figfile, format='png')
+            figfile.seek(0)  # rewind to beginning of file
 
-                profile_plot = base64.b64encode(figfile.getvalue()).decode('utf8')
+            profile_plot = base64.b64encode(figfile.getvalue()).decode('utf8')
             
         # Run this regardless if it's a get request or a post request
-        return render_template("define-profile.html", form_data=request.form, profile_plot=profile_plot)
+        return_value = render_template(
+            "define-profile.html", 
+            form_data=request.form, 
+            profile_plot=profile_plot, 
+            continue_button_active="btn btn-primary" if fit_playlist is not None else "btn btn-secondary"
+        )
+        return return_value
         

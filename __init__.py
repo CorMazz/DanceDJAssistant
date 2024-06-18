@@ -16,7 +16,8 @@ def create_app(test_config=None):
     
     app.config.from_mapping(
         SECRET_KEY="dev",
-        SQLALCHEMY_DATABASE_URI=f'sqlite:///{db_name}'
+        SQLALCHEMY_DATABASE_URI=f'sqlite:///{db_name}',
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
     )
     
     db.init_app(app)

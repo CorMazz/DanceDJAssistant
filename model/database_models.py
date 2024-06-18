@@ -12,9 +12,11 @@ from flask_login import UserMixin
 
 
 class Song(db.Model):
-    """Store songs in the database. Each song can be identiied by its URL/I and it's BPM."""
+    """Store songs in the database. Each song can be identiied by its URL/I"""
     url = db.Column(db.String(300), primary_key=True)
-    bpm = db.Column(db.Integer)
+    tempo = db.Column(db.Float)
+    duration = db.Column(db.Float)
+    tempo_adjustment_factor = db.Column(db.Float)
         
 
     

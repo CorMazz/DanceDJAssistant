@@ -24,6 +24,7 @@ from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+NoneType = type(None)
 
 class DanceDJ:
     
@@ -57,14 +58,14 @@ class DanceDJ:
         
         self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
         
-        if not isinstance(retry_config, (dict, type(None))):
+        if not isinstance(retry_config, (dict, NoneType)):
             raise TypeError(f"retry_config is of type {type(retry_config)} when it should be a dict or None.")
         self.retry_config = retry_config or {
             'stop': stop_after_attempt(3),
             'wait': wait_exponential(multiplier=1, min=4, max=10)
         }
         
-        # if not isinstance(db_url, (str, os.PathLike, type(None))):
+        # if not isinstance(db_url, (str, os.PathLike, NoneType)):
         #     raise TypeError(f"db_url is of type {type(db_url)} when it should be a str, os.PathLike, or None.")
         # elif isinstance(db_url, str):
         #     db_url = Path(db_url)
@@ -141,7 +142,9 @@ class DanceDJ:
             "key",
             "key_confidence",
             "time_signature", 
-            "time_signature_confidence"
+            "time_signature_confidence",
+            "duration",
+            
         ),
         progress_bar: bool = True,
         ) -> pd.DataFrame | str:
@@ -172,7 +175,8 @@ class DanceDJ:
                 "key",
                 "key_confidence",
                 "time_signature", 
-                "time_signature_confidence"
+                "time_signature_confidence",
+                "duration",
             )
         
         progress_bar : bool, optional
@@ -190,7 +194,7 @@ class DanceDJ:
         iterator = tqdm(song_ids, desc="Analyzing Songs") if progress_bar else song_ids
         
         # Initialize a dictionary to hold the analyses for a given song
-        analyses = {song_id: self._sp.audio_analysis(song_id) 
+        analyses = {song_id: self.robust_audio_analysis(song_id) 
                     for song_id in iterator}
             
         # Get a summary of the information for all of these songs in a single dataframe
@@ -238,7 +242,7 @@ class DanceDJ:
         song_summary_df : pd.DataFrame
             A DataFrame with a "tempo" column which contains the BPM information for the song.
         method : str
-            Determine what method to use to approximate the playlist. 
+            Determine what method to use to approximate the playlist. Default is naive.
             
             "naive":
                 Deterministically select songs by moving 1 target BPM at a time and searching
@@ -257,11 +261,6 @@ class DanceDJ:
                 of what the target profile generally looks like. (ie, when rearranging an existing
                 playlist).
 
-        Raises
-        ------
-        ValueError
-            If the tempo profile is longer than the number of songs in the song_summary_df, raise
-            an error. 
 
         Returns
         -------
@@ -270,20 +269,6 @@ class DanceDJ:
 
         """
         
-        # plot_results : bool
-        #     Create a Matplotlib figure of the target profile and the achieved profile. If the 
-        #     target profile is the same length as the song_summary_df, also plots the original
-        #     song profile. 
-                
-        # results : dict[pd.DataFrame, plt.Figure]
-        #     A dictionary containing the selected_songs DataFrame and the Figure object if 
-        #     plot_results is set to True. 
-
-        
-        # Validate the inputs
-        if len(tempo_profile) > len(song_summary_df):
-            raise ValueError("There are not enough songs to match this profile. Add more songs.")
-        
         if method == "naive":
             
             # Initialize a list
@@ -291,6 +276,9 @@ class DanceDJ:
             
             # Loop through each position of the tempo profile and find the closest song
             for bpm in tempo_profile:
+                if not song_summary_df:
+                    break
+                
                 min_idx = np.argmin(abs(song_summary_df['tempo'] - bpm))
                 
                 # Save the closest song
@@ -458,7 +446,8 @@ class DanceDJ:
             tempo_bounds: tuple[int, int],
             n_cycles: float, 
             horizontal_shift: float, 
-            n_songs: int
+            n_songs: int,
+            n_points: int | None = None
         ) -> np.ndarray:
         """
         Define a sinusoidal tempo profile for a given number of songs.
@@ -478,27 +467,41 @@ class DanceDJ:
             The horizontal shift applied to the sinusoidal function.
         n_songs : int
             The number of songs in the generated profile.
+        n_points : int or None, optional
+            The number of points to put in the sinusoidal profile. Default is None, which is equivalent to n_songs. 
+            Must be greater than n_songs if provided, or will default to n_songs. 
     
         Returns
         -------
         np.ndarray
-            An array containing the sinusoidal tempo profile.
+            An array containing the x-values and y-values of the sinusoidal tempo profile. If n_points is None, the
+            x-values (first column) are just the indices of the songs. If n_points is greater than n_songs then the 
+            x-values are evenly spread between 1 and the number of songs. 
         """
+        
+        if n_points is None or n_points < n_songs:
+            n_points = n_songs
+        
         # Define a target tempo profile for n songs
-        amplitude = tempo_bounds[1] - tempo_bounds[0]
+        amplitude = (tempo_bounds[1] - tempo_bounds[0]) / 2
         mean = np.mean(tempo_bounds)
-        song_idx = np.linspace(0, 1, n_songs)
-        return amplitude*np.sin( n_cycles * 2 * np.pi * (song_idx + horizontal_shift*(n_songs/n_cycles))) + mean
-    
+        x = np.linspace(0, n_songs - 1, n_points)
+        y = amplitude * np.sin(2 * np.pi * n_cycles * (x / (n_songs - 1)) + horizontal_shift * 2 * np.pi) + mean
+        return np.column_stack((x + 1, y))
+        
 # ----------------------------------------------------------------------------------------------------------------------
 # Plot Profile
 # ----------------------------------------------------------------------------------------------------------------------
 
-    def plot_profile(
+    def plot_profile_matplotlib(
             self, 
-            profile: np.ndarray,
+            target_profile: np.ndarray | None,
+            analyzed_playlist: pd.DataFrame | None = None,
             fig_kwargs: dict | None = None,
-            ax_plot_kwargs: dict | None = None,
+            target_profile_kwargs: dict | None = None,
+            analyzed_playlist_kwargs: dict | None = None,
+            fig: plt.Figure | None = None,
+            ax: plt.Axes | None = None,
         ) -> (plt.Figure, plt.Axes):
         """
         Plot the target tempo profile.
@@ -509,14 +512,26 @@ class DanceDJ:
     
         Parameters
         ----------
-        profile : np.ndarray
-            An array containing the tempo profile to be plotted.
+        target_profile : np.ndarray or None
+            An 1 or 2D array containing the tempo profile to be plotted. If 2D, first column is x, second is y. If 1D,
+            assumes that the x-values are defined by np.arange(1, len(target_profile))
+        analyzed_playlist : pd.DataFrame or None, optional
+            A DataFrame with information about the analyzed playlist. At minimum needs to have a "tempo" column. 
+            If "tempo_adjustment_factor" is in the DataFrame, will plot those points as red to indicate uncertainy in
+            their tempo. 
         fig_kwargs : dict or None, optional
             A dictionary of keyword arguments to be passed to `plt.subplots` 
             for figure customization. Default is None.
-        ax_plot_kwargs : dict or None, optional
+        target_profile_kwargs : dict or None, optional
+            A dictionary of keyword arguments to be passed to `ax.plot` 
+        analyzed_playlist_kwargs : dict or None, optional
             A dictionary of keyword arguments to be passed to `ax.plot` 
             for axis customization. Default is None.
+        fig : plt.Figure or None, optional
+            A Figure object to create the plot on. Technically does not need the figure, it is simply returned. Axes are
+            required, but if no figure is provided, the return signature becomes (None, ax).
+        ax : plt.Axes or None, optional
+            Axes object to plot on. If None is passed, creates the figure and the axes.
     
         Returns
         -------
@@ -535,33 +550,75 @@ class DanceDJ:
         Notes
         -----
         The function uses default plot settings, which can be overridden by 
-        providing `fig_kwargs` and `ax_plot_kwargs`. If no customization is 
+        providing `fig_kwargs` and `target_profile_kwargs`. If no customization is 
         provided, the plot will use the default settings:
         
         - `fig_kwargs`: empty dictionary
-        - `ax_plot_kwargs`: {'label': 'Target Profile', 'color': 'k', 'marker': 'o', 'linestyle': '--'}
+        - `target_profile_kwargs`: {'label': 'Target Profile', 'color': 'k', 'marker': 'o', 'linestyle': '--'}
     
         The function also validates the types of the input variables before 
         proceeding with plotting.
         """
         
         self.__validate_variable_types([
-            ("profile", profile, np.ndarray),
-            ("fig_kwargs", fig_kwargs, (dict, type(None))),
-            ("ax_plot_kwargs", ax_plot_kwargs, (dict, type(None)))
+            ("target_profile", target_profile, np.ndarray),
+            ("fig_kwargs", fig_kwargs, (dict, NoneType)),
+            ("target_profile_kwargs", target_profile_kwargs, (dict, NoneType)),
+            ("analyzed_playlist_kwargs", analyzed_playlist_kwargs, (dict, NoneType)),
+            ("fig", fig, (plt.Figure, NoneType)),
+            ("ax", ax, (plt.Axes, NoneType))
         ])
         
         fig_kwargs = fig_kwargs or {}
         
-        # Define default ax_plot_kwargs and update with function inputs
-        ax_plot_kwargs = dict(label="Target Profile", color="k", marker="o", linestyle="--") | (ax_plot_kwargs or {})
+        if ax is None:
+            fig, ax = plt.subplots(**fig_kwargs)
         
-        # Plot the target profile
-        fig, ax = plt.subplots(**fig_kwargs)
-        ax.plot(profile, **ax_plot_kwargs)
+        if target_profile is not None:
+            # Define default target_profile_kwargs and update with function inputs
+            target_profile_kwargs = (
+                dict(label="Target Profile", color="k", marker="o", linestyle="--") | (target_profile_kwargs or {})
+            )
+            if target_profile.ndim == 1:
+                ax.plot(target_profile, **target_profile_kwargs)
+            elif target_profile.ndim == 2:
+                ax.plot(target_profile[:, 0], target_profile[:, 1], **target_profile_kwargs)
+            else:
+                raise ValueError("Target profile must not be greater than 2D. ")
+        
+        if analyzed_playlist is not None:
+            if analyzed_playlist.get("tempo") is None:
+                raise KeyError(
+                    "There is no 'tempo' column in the analyzed playlist DataFrame. This is required if that DataFrame "
+                    "is provided."
+                )
+                
+            analyzed_playlist_kwargs = (
+                dict(label="Playlist Profile", color="b", marker="^", linestyle="-") | (analyzed_playlist_kwargs or {})
+            )
+            
+            ax.plot(analyzed_playlist.get("tempo").to_numpy(), **analyzed_playlist_kwargs)
+
+            # Highlight adjusted tempos which may be incorrect.
+            if "tempo_adjustment_factor" in analyzed_playlist:
+                # Points where tempo_adjustment_factor is not 1
+                adjustment_mask = analyzed_playlist["tempo_adjustment_factor"] != 1
+                ax.plot(
+                    np.arange(0, len(analyzed_playlist))[adjustment_mask], 
+                    analyzed_playlist["tempo"][adjustment_mask], 
+                    **(
+                        analyzed_playlist_kwargs 
+                        | dict(color="r", label="Adjusted Tempo Songs", linestyle="", markersize=8)
+                    ), 
+                )
+            
+            
+
+                
+
+        
         ax.set_ylabel("Tempo (BPM)")
         ax.set_xlabel("Song Number")
-        ax.set_title("Target Song Profile")
         ax.legend()
         
         return fig, ax
@@ -597,14 +654,14 @@ class DanceDJ:
         --------
         #>>> import numpy as np
         #>>> data = np.array([1, 2, 3])
-        #>>> validate_variable_types([('data', data, (np.ndarray, type(None)))])
+        #>>> validate_variable_types([('data', data, (np.ndarray, NoneType))])
     
-        #>>> validate_variable_types([('data', data, (list, type(None)))])
+        #>>> validate_variable_types([('data', data, (list, NoneType))])
         Traceback (most recent call last):
             ...
         TypeError: data is of type <class 'numpy.ndarray'> when it should be one of (<class 'list'>, <class 'NoneType'>).
     
-        #>>> validate_variable_types([('data', data, (list, type(None)), "CUSTOM ERROR MESSAGE HERE.")])
+        #>>> validate_variable_types([('data', data, (list, NoneType), "CUSTOM ERROR MESSAGE HERE.")])
         Traceback (most recent call last):
             ...
         TypeError: data is of type <class 'numpy.ndarray'> CUSTOM ERROR MESSAGE HERE.
