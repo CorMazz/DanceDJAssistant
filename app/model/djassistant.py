@@ -255,6 +255,7 @@ class DanceDJ:
         # robust analysis below.
         
         if self._db_session is not None:
+            # TODO: replace the outdated query API with the prefered API
             cached_songs = self._db_session.query(Song).filter(Song.url.in_(song_ids)).all() if load_from_db else []
             
             # Extract useful parameters as dict
@@ -594,16 +595,17 @@ class DanceDJ:
 
     def plot_profile_matplotlib(
             self, 
-            target_profile: np.ndarray | None,
+            *,
+            target_profile: np.ndarray | None = None,
             analyzed_playlist: pd.DataFrame | None = None,
             fig_kwargs: dict | None = None,
             target_profile_kwargs: dict | None = None,
             analyzed_playlist_kwargs: dict | None = None,
             fig: plt.Figure | None = None,
             ax: plt.Axes | None = None,
-        ) -> (plt.Figure, plt.Axes):
+        ) -> (plt.Figure | None, plt.Axes):
         """
-        Plot the target tempo profile.
+        Plot the target tempo profile or the current playlist profile.
     
         This function creates a plot of the given target tempo profile using 
         matplotlib. The plot can be customized with additional keyword arguments 
@@ -611,12 +613,12 @@ class DanceDJ:
     
         Parameters
         ----------
-        target_profile : np.ndarray or None
+        target_profile : np.ndarray or None, optional
             An 1 or 2D array containing the tempo profile to be plotted. If 2D, first column is x, second is y. If 1D,
             assumes that the x-values are defined by np.arange(1, len(target_profile))
         analyzed_playlist : pd.DataFrame or None, optional
             A DataFrame with information about the analyzed playlist. At minimum needs to have a "tempo" column. 
-            If "tempo_adjustment_factor" is in the DataFrame, will plot those points as red to indicate uncertainy in
+            If "tempo_adjustment_factor" is in the DataFrame, will plot those points as red to indicate uncertainty in
             their tempo. 
         fig_kwargs : dict or None, optional
             A dictionary of keyword arguments to be passed to `plt.subplots` 
@@ -634,8 +636,8 @@ class DanceDJ:
     
         Returns
         -------
-        fig : plt.Figure
-            The matplotlib figure object containing the plot.
+        fig : plt.Figure | None
+            The matplotlib figure object containing the plot, or None if axes was fed but no figure was fed. 
         ax : plt.Axes
             The matplotlib axes object containing the plot.
     
@@ -655,8 +657,7 @@ class DanceDJ:
         - `fig_kwargs`: empty dictionary
         - `target_profile_kwargs`: {'label': 'Target Profile', 'color': 'k', 'marker': 'o', 'linestyle': '--'}
     
-        The function also validates the types of the input variables before 
-        proceeding with plotting.
+        The function also validates the types of the input variables before proceeding with plotting.
         """
         
         self.__validate_variable_types([
