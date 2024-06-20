@@ -17,7 +17,7 @@ class Song(db.Model):
     tempo = db.Column(db.Float)
     duration = db.Column(db.Float)
     tempo_adjustment_factor = db.Column(db.Float)
-        
+
 
     
 # class User(db.Model, UserMixin):

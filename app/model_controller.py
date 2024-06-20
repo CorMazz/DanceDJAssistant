@@ -10,9 +10,12 @@ Created on Wed Jun 12 01:09:39 2024
 import os
 import base64
 import pandas as pd
+from .extensions import db
 from io import BytesIO, StringIO
-from model.DJAssistant import DanceDJ
+from .model.djassistant import DanceDJ
 from flask import (Blueprint, render_template, request, flash, redirect, url_for, session)
+
+
 
 playlist_analyzer = Blueprint('playlist_analyzer', __name__)
 
@@ -69,6 +72,12 @@ def analyze_playlist():
         
         # TODO: Refactor this so that the DanceDJ class has the caching functionality with SQL, it just accepts the DB
         # connection to use from the Flask app
+        
+        # Search to see what songs are in the database
+        # new_songs = 
+            
+        
+        
         processed_playlist =  DanceDJ().analyze_songs(
             songs.keys(), 
             songs.values(),

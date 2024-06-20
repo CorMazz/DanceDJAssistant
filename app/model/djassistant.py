@@ -24,7 +24,57 @@ from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+
+
+try:
+    from sqlalchemy import create_engine, Column, Integer, String, inspect, Float
+    from sqlalchemy.ext.declarative import declarative_base
+    from sqlalchemy.orm import sessionmaker
+    from contextlib import contextmanager
+    db_enabled=True
+except ImportError:
+    db_enabled=False
+
 NoneType = type(None)
+
+########################################################################################################################
+# Optional Database Functionality
+########################################################################################################################
+
+if db_enabled:
+    
+    # Define the Base class for declarative models
+    Base = declarative_base()
+    
+    # Define an example model (table)
+    class Song(Base):
+        """Store songs in the database. Each song can be identiied by its URL/I"""
+        __tablename__ = 'djassistant_songs'
+        url = Column(String(300), primary_key=True)
+        tempo = Column(Float)
+        duration = Column(Float)
+        
+        def to_dict(self, include_url: bool = True):
+            """
+            
+
+            Parameters
+            ----------
+            include_url : bool, optional
+                Include the URL as a key-value pair in the dict. The default is True.
+
+            Returns
+            -------
+            return_val : TYPE
+                A dictionary of the parameters in the class. 
+
+            """
+            return_val = dict(tempo=self.tempo,duration=self.duration)
+            
+            if include_url:
+                return_val.update(dict(url=self.url))
+            return return_val
+
 
 class DanceDJ:
     
@@ -32,7 +82,7 @@ class DanceDJ:
             self, 
             scope="playlist-modify-public playlist-modify-private ugc-image-upload", 
             retry_config: dict | None = None,
-            # db_url: str | os.PathLike | None = None,
+            db_session: None = None,
         ):
         """
         Instantiates a connection to the Spotify API. See the Spotipy documentation to learn 
@@ -45,32 +95,32 @@ class DanceDJ:
                     'stop': stop_after_attempt(3),
                     'wait': wait_exponential(multiplier=1, min=4, max=10)
                 }
+                
+        db_session : sqlalchemy.Session | None, optional
+            An optional sqlalchemy.Session object to use as a database to implement song caching. Creates a table called
+            djassistant_songs if it does not already exist. The default is None, meaning no caching is implemented. 
+            Currently the database stores a song URL as the primary key, it's tempo in BPM, and it's duration.       
         """
-        # db_url : str | False | None, optional
-        #     A url for the SQL database to connect to. The database will be used as a persistent cache of song 
-        #     information to limit calls to the Spotipy API. 
-        #         If a string | os.PathLike:
-        #             Connects to the existing database at this URL and adds a table. Once the analyze songs method is 
-        #             called. If there is no existing database, creates a new one.
-        #         If None: 
-        #             Does not connect to a database.
+
 
         
         self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
         
         if not isinstance(retry_config, (dict, NoneType)):
             raise TypeError(f"retry_config is of type {type(retry_config)} when it should be a dict or None.")
-        self.retry_config = retry_config or {
+        self._retry_config = retry_config or {
             'stop': stop_after_attempt(3),
             'wait': wait_exponential(multiplier=1, min=4, max=10)
         }
         
-        # if not isinstance(db_url, (str, os.PathLike, NoneType)):
-        #     raise TypeError(f"db_url is of type {type(db_url)} when it should be a str, os.PathLike, or None.")
-        # elif isinstance(db_url, str):
-        #     db_url = Path(db_url)
+        self._db_session = db_session
+        if db_enabled and db_session is not None:
             
-        # if db_url is not None:
+            # Create the table if it doesn't already exist in the db
+            inspector = inspect(self._db_session.bind)
+            if not inspector.has_table("djassistant_songs"):
+                Base.metadata.create_all(self._db_session.bind)
+                    
             
         
 ########################################################################################################################
@@ -127,6 +177,8 @@ class DanceDJ:
             
         return parsed_songs
     
+    
+    
 # -------------------------------------------------------------------------------------------------
 # Analyze Songs
 # -------------------------------------------------------------------------------------------------
@@ -147,6 +199,8 @@ class DanceDJ:
             
         ),
         progress_bar: bool = True,
+        load_from_db: bool = True,
+        save_to_db: bool = True,
         ) -> pd.DataFrame | str:
         """
         Given a list of song_ids, analyzes the songs and returns a DataFrame with important 
@@ -181,6 +235,12 @@ class DanceDJ:
         
         progress_bar : bool, optional
             Show a progress bar or not. The default is True.
+        load_from_db : bool, optional
+            Loads songs that are already in the database instead of re-analyzing them, if a session was provided when 
+            constructing the DanceDJ class. Default is True.
+        save_to_db : bool, optional
+            Save new songs to the database, if a session was provided when constructing the DanceDJ class. Default 
+            is True.
 
 
         Returns
@@ -190,32 +250,68 @@ class DanceDJ:
 
         """
         
+        # If the session exists, search for the songs that are already within a table labeled "songs" and grab the desired
+        # info from that table. If the desired info isn't in the table, or a song isn't in the table, then perform the 
+        # robust analysis below.
+        
+        if self._db_session is not None:
+            cached_songs = self._db_session.query(Song).filter(Song.url.in_(song_ids)).all() if load_from_db else []
+            
+            # Extract useful parameters as dict
+            cached_songs =  {song.url: song.to_dict(include_url=False)
+                for song in cached_songs
+            }
+            
+            cached_song_summary=pd.DataFrame(cached_songs).T
+            
+            new_songs = set(song_ids) - set(cached_songs.keys())
+        else:
+            cached_song_summary = pd.DataFrame()
+            new_songs = song_ids
+        
         # Define the iterator
-        iterator = tqdm(song_ids, desc="Analyzing Songs") if progress_bar else song_ids
+        iterator = tqdm(new_songs, desc="Analyzing Songs") if progress_bar else new_songs
         
         # Initialize a dictionary to hold the analyses for a given song
         analyses = {song_id: self.robust_audio_analysis(song_id) 
                     for song_id in iterator}
+        
+        # Store the new songs in the database
+        if self._db_session is not None and save_to_db and analyses:
+            
+            # Prepare data for database storage
+            new_songs_to_save = [
+                Song(**{'url': song_id, 'tempo': analysis['track']['tempo'], 'duration': analysis['track']['duration']})
+                for song_id, analysis in analyses.items()]
+
+                
+            self._db_session.add_all(new_songs_to_save)
+            self._db_session.commit()
             
         # Get a summary of the information for all of these songs in a single dataframe
-        summary = pd.concat(
+        new_song_summary = pd.concat(
             {info_type: 
                  pd.Series({k:analysis['track'][info_type] for k, analysis in analyses.items()}) 
                  for info_type in desired_info},axis=1
         ).rename_axis("URL")
             
+        all_songs = pd.concat([new_song_summary, cached_song_summary])
+            
+        # Reorder the songs back to their original order
+        all_songs = all_songs.loc[song_ids]
+            
         if song_names is not None:
-            summary["name"] = song_names
+            all_songs["name"] = song_names
             
             # Move the name column to the front
-            last_column = summary.pop(summary.columns[-1])
-            summary.insert(0, last_column.name, last_column)
+            last_column = all_songs.pop(all_songs.columns[-1])
+            all_songs.insert(0, last_column.name, last_column)
             
             
         if adjust_tempo is not None:
-            summary = self.adjust_tempo(summary, adjust_tempo)
+            all_songs = self.adjust_tempo(all_songs, adjust_tempo)
             
-        return summary
+        return all_songs
     
     # TODO: Add a function which analyzes the playlist and gives a summary of it's stats, such as total length, bpm 
     # quartiles, a bpm histogram, 
@@ -427,7 +523,7 @@ class DanceDJ:
     
     def __get_retry_decorator(self):
         """Enables us to have the user feed in retry options via kwargs to the DanceDJ constructor."""
-        return retry(**self.retry_config)
+        return retry(**self._retry_config)
 
     def robust_audio_analysis(self, song_id):
         """Wraps Spotipy's audio_analysis method with a Tenacity decorator that makes it retry polling the API if it 

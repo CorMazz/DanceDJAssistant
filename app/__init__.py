@@ -1,10 +1,8 @@
 import os
-from flask import Flask, render_template
-from flask_sqlalchemy import SQLAlchemy
 from pathlib import Path
-
-db = SQLAlchemy()
-db_name = "database.db"
+from .extensions import db, db_name
+from .model_controller import playlist_analyzer
+from flask import Flask, render_template
 
 ########################################################################################################################
 # 
@@ -39,8 +37,7 @@ def create_app(test_config=None):
     def dev():
         return render_template("base.html")
     
-    # Register pages
-    from model_controller import playlist_analyzer
+
     app.register_blueprint(playlist_analyzer)
     
     return app
