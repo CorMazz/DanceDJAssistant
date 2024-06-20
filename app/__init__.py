@@ -18,20 +18,21 @@ def create_app(test_config=None):
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
     )
     
-    db.init_app(app)
     # Load configuration depending on if I'm testing or just running
     if test_config is None:
         app.config.from_pyfile('config.py', silent=True)
     else:
         app.config.from_mapping(test_config)
-        
+    
     # ensure the instance folder exists
     os.makedirs(app.instance_path, exist_ok=True)
     
-    print(f"{app.instance_path=}")
-    
     with app.app_context():
         create_database(app)
+    
+    # Start the SQL database
+    db.init_app(app)
+
     
     @app.route('/dev')
     def dev():

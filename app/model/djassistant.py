@@ -115,11 +115,11 @@ class DanceDJ:
         
         self._db_session = db_session
         if db_enabled and db_session is not None:
-            
             # Create the table if it doesn't already exist in the db
-            inspector = inspect(self._db_session.bind)
+            engine = self._db_session.get_bind() 
+            inspector = inspect(engine)
             if not inspector.has_table("djassistant_songs"):
-                Base.metadata.create_all(self._db_session.bind)
+                Base.metadata.create_all(engine)
                     
             
         
@@ -269,8 +269,11 @@ class DanceDJ:
             cached_song_summary = pd.DataFrame()
             new_songs = song_ids
         
-        # Define the iterator
-        iterator = tqdm(new_songs, desc="Analyzing Songs") if progress_bar else new_songs
+        # Make the tqdm iterator count the total songs starting from the number found in the cache
+        iterator = (
+            tqdm(new_songs, desc="Analyzing Songs", initial=len(cached_song_summary), total=len(song_ids)) 
+            if progress_bar else new_songs
+        )
         
         # Initialize a dictionary to hold the analyses for a given song
         analyses = {song_id: self.robust_audio_analysis(song_id) 
@@ -693,14 +696,18 @@ class DanceDJ:
                 dict(label="Playlist Profile", color="b", marker="^", linestyle="-") | (analyzed_playlist_kwargs or {})
             )
             
-            ax.plot(analyzed_playlist.get("tempo").to_numpy(), **analyzed_playlist_kwargs)
+            ax.plot(
+                np.arange(1, len(analyzed_playlist) + 1),
+                analyzed_playlist.get("tempo").to_numpy(),
+                **analyzed_playlist_kwargs
+            )
 
             # Highlight adjusted tempos which may be incorrect.
             if "tempo_adjustment_factor" in analyzed_playlist:
                 # Points where tempo_adjustment_factor is not 1
                 adjustment_mask = analyzed_playlist["tempo_adjustment_factor"] != 1
                 ax.plot(
-                    np.arange(0, len(analyzed_playlist))[adjustment_mask], 
+                    np.arange(1, len(analyzed_playlist) + 1)[adjustment_mask], 
                     analyzed_playlist["tempo"][adjustment_mask], 
                     **(
                         analyzed_playlist_kwargs 
@@ -708,11 +715,6 @@ class DanceDJ:
                     ), 
                 )
             
-            
-
-                
-
-        
         ax.set_ylabel("Tempo (BPM)")
         ax.set_xlabel("Song Number")
         ax.legend()

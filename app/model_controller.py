@@ -70,22 +70,15 @@ def analyze_playlist():
         return redirect(url_for("playlist_analyzer.select_playlist"))
     else:
         
-        # TODO: Refactor this so that the DanceDJ class has the caching functionality with SQL, it just accepts the DB
-        # connection to use from the Flask app
         
-        # Search to see what songs are in the database
-        # new_songs = 
-            
-        
-        
-        processed_playlist =  DanceDJ().analyze_songs(
+        processed_playlist =  DanceDJ(db_session=db.session).analyze_songs(
             songs.keys(), 
             songs.values(),
             desired_info=(
                 "tempo",
                 "duration",
-                "key",
-                "time_signature", 
+                # "key",
+                # "time_signature", 
             ),
             progress_bar=True
             )
@@ -119,8 +112,8 @@ def define_profile():
         
         if request.method == "POST":
             target_profile = DanceDJ().generate_sinusoidal_profile(
-                (int(request.form.get("min_bpm")), int(request.form.get("max_bpm"))),
-                float(request.form.get("n_cycles")), 
+                (int(request.form.get("min_bpm", 0)), int(request.form.get("max_bpm", 0))),
+                float(request.form.get("n_cycles", 1)), 
                 float(request.form.get("horizontal_shift", 0)),
                 n_songs,
                 n_points=n_songs*50

@@ -6,6 +6,8 @@ Created on Tue Jun 18 13:48:33 2024
 """
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import declarative_base
 
-db = SQLAlchemy()
+Base = declarative_base()
+db = SQLAlchemy(model_class=Base)
 db_name = "database.db"
