@@ -5,15 +5,19 @@ Created on Wed Jun 12 01:09:39 2024
 @author: mazzac3
 
 
+https://stackoverflow.com/questions/31948285/display-data-streamed-from-a-flask-view-as-it-updates/64974111#64974111
+https://medium.com/@ruixdsgn/a-guide-to-implementing-oauth-authorization-using-spotipy-for-a-playlist-generator-app-6ab50cdf6c3
 """
 
 import os
+import json
 import base64
+import numpy as np
 import pandas as pd
 from .extensions import db
 from io import BytesIO, StringIO
 from .model.djassistant import DanceDJ
-from flask import (Blueprint, render_template, request, flash, redirect, url_for, session)
+from flask import (Blueprint, render_template, request, flash, redirect, url_for, session, jsonify)
 
 
 
@@ -63,6 +67,7 @@ def view_playlist():
     
 @playlist_analyzer.route('/analyze-playlist', methods=['GET', 'POST'])
 def analyze_playlist():
+    
     # The HTML contains logic to move from this page to the define profile page upon clicking a button
     
     if (songs := session.get('songs')) is None or (link := session.get('playlist-link')) is None:
@@ -70,6 +75,7 @@ def analyze_playlist():
         return redirect(url_for("playlist_analyzer.select_playlist"))
     else:
         
+        # TODO add the progress bar to the flask app
         
         processed_playlist =  DanceDJ(db_session=db.session).analyze_songs(
             songs.keys(), 
@@ -85,7 +91,6 @@ def analyze_playlist():
         
         # Store the jsonified dataframe for use in future views
         session['processed-playlist'] = processed_playlist.to_json()
-        print(f"{session['processed-playlist']=}")
         
         # TODO: Add the DanceDJ().calculate_playlist_statistics() function results to this page. 
         
@@ -111,26 +116,35 @@ def define_profile():
         profile_plot, fit_playlist, rearranged_playlist = None, None, None
         
         if request.method == "POST":
-            target_profile = DanceDJ().generate_sinusoidal_profile(
-                (int(request.form.get("min_bpm", 0)), int(request.form.get("max_bpm", 0))),
-                float(request.form.get("n_cycles", 1)), 
-                float(request.form.get("horizontal_shift", 0)),
-                n_songs,
-                n_points=n_songs*50
+            dj = DanceDJ(connect_to_spotipy=False)
+            
+            profile_kwargs = dict(                
+                tempo_bounds=(int(request.form.get("min_bpm", 0)), int(request.form.get("max_bpm", 0))),
+                n_cycles=float(request.form.get("n_cycles", 1)), 
+                horizontal_shift=float(request.form.get("horizontal_shift", 0)),
+                n_songs=n_songs,
+                n_points=n_songs*50,
             )
             
+            target_profile = dj.generate_sinusoidal_profile(**profile_kwargs)
+
+            session['target-profile-kwargs'] = json.dumps(profile_kwargs)
+                    
             # checkbox result is either None (NoneType) or str("on")
             if (fit_playlist := request.form.get("fit_playlist")) is not None:
-                analyzed_playlist = pd.read_json(StringIO(session['processed-playlist']))
-                rearranged_playlist = DanceDJ().match_tempo_profile(
+                analyzed_playlist = pd.read_json(StringIO(processed_playlist))
+                rearranged_playlist = dj.match_tempo_profile(
                     target_profile,
                     analyzed_playlist,
                     method="euclidean"  # no need to upsample, profile is already oversampled
                 )
+                
+                # Store the jsonified dataframe for use in future views
+                session['rearranged-playlist'] = rearranged_playlist.to_json()
             
-            fig, ax = DanceDJ().plot_profile_matplotlib(
-                target_profile, 
-                rearranged_playlist, 
+            fig, ax = dj.plot_profile_matplotlib(
+                target_profile=target_profile, 
+                analyzed_playlist=rearranged_playlist, 
                 target_profile_kwargs=dict(markersize=4),
                 fig_kwargs=dict(figsize=(8,6)),
             )
@@ -151,3 +165,31 @@ def define_profile():
         )
         return return_value
         
+# ----------------------------------------------------------------------------------------------------------------------
+# 
+# ----------------------------------------------------------------------------------------------------------------------
+    
+@playlist_analyzer.route('/upload-playlist', methods=['GET'])
+def upload_playlist():
+    if (
+            (rearranged_playlist := session.get("rearranged-playlist")) is None 
+            or (target_profile_kwargs := session.get("target-profile-kwargs")) is None 
+            or not (n_songs := len(session.get('songs', 0)))
+            
+        ):
+        flash("No playlist has been rearranged. Returning to define profile page.", "error")
+        return redirect(url_for("playlist_analyzer.define_profile"))
+    
+    dj = DanceDJ()
+    
+    # convert the rearranged playlist and target profile back from json
+    rearranged_playlist = pd.read_json(StringIO(rearranged_playlist))
+    target_profile_kwargs = json.loads(target_profile_kwargs)
+    target_profile = dj.generate_sinusoidal_profile(**target_profile_kwargs)
+    print("Went to the upload playlist page.")
+    
+    return redirect(url_for("playlist_analyzer.select_playlist"))
+    
+    
+    
+    

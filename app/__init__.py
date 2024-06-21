@@ -16,6 +16,7 @@ def create_app(test_config=None):
         SECRET_KEY="dev",
         SQLALCHEMY_DATABASE_URI=f'sqlite:///{db_name}',
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        
     )
     
     # Load configuration depending on if I'm testing or just running

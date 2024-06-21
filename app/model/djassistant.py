@@ -83,6 +83,8 @@ class DanceDJ:
             scope="playlist-modify-public playlist-modify-private ugc-image-upload", 
             retry_config: dict | None = None,
             db_session: None = None,
+            spotipy_oauth_kwargs: dict | None = None,
+            connect_to_spotipy: bool = True
         ):
         """
         Instantiates a connection to the Spotify API. See the Spotipy documentation to learn 
@@ -99,12 +101,37 @@ class DanceDJ:
         db_session : sqlalchemy.Session | None, optional
             An optional sqlalchemy.Session object to use as a database to implement song caching. Creates a table called
             djassistant_songs if it does not already exist. The default is None, meaning no caching is implemented. 
-            Currently the database stores a song URL as the primary key, it's tempo in BPM, and it's duration.       
+            Currently the database stores a song URL as the primary key, it's tempo in BPM, and it's duration.      
+            
+        spotipy_oauth_kwargs : dict | None, optional
+            Keyword arguments to be fed to the spotipy.SpotifyOAuth class. Requires: 
+                client_id
+                client_secret
+                redirect_uri
+            If not provided, assumes that these are set using environment variables. 
+            
+            See the Spotipy documentation for more information. 
+            https://spotipy.readthedocs.io/en/2.24.0/#spotipy.oauth2.SpotifyOAuth
+            
+        connect_to_spotipy : bool, optional
+            Chose whether to connect to the Spotipy API. If you don't need the Spotipy API functionality and just need
+            the plotting or rearranging functionality, you can disable the SpotipyOAuth logic. The default is True.      
+
         """
 
+        self._connect_to_spotipy = connect_to_spotipy
 
+        self.__validate_variable_types([
+            ("scope", scope, str),
+            ("retry_config", retry_config, (dict, NoneType)),
+            ("spotipy_oauth_kwargs", spotipy_oauth_kwargs, (dict, NoneType)),
+            ("connect_to_spotipy", connect_to_spotipy, bool),
+        ])
         
-        self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope))
+        spotipy_oauth_kwargs = spotipy_oauth_kwargs or {}
+
+        if self._connect_to_spotipy:
+            self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope, **spotipy_oauth_kwargs))
         
         if not isinstance(retry_config, (dict, NoneType)):
             raise TypeError(f"retry_config is of type {type(retry_config)} when it should be a dict or None.")
@@ -147,6 +174,9 @@ class DanceDJ:
             This was on purpose, since urls are unique, as keys need to be. 
     
         """
+        
+        if not self._connect_to_spotipy:
+            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
         
         # Get the total number of tracks in the playlist
         playlist = self._sp.playlist(playlist_id)
@@ -277,6 +307,10 @@ class DanceDJ:
         )
         
         # Initialize a dictionary to hold the analyses for a given song
+        
+        if new_songs and not self._connect_to_spotipy:
+            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
+        
         analyses = {song_id: self.robust_audio_analysis(song_id) 
                     for song_id in iterator}
         
@@ -435,6 +469,7 @@ class DanceDJ:
             playlist_songs: list[str],
             description: str = "Created by the DJAssistant.",
             cover_image_b64: bytes | plt.Figure | None = None,
+            raise_errors: bool = True,
             verbose: bool = True,
             ):
         """
@@ -453,6 +488,8 @@ class DanceDJ:
             A b64 byte string containing the image, or a Matplotlib figure that will be converted
             to a b64 byte string. Ideally, make the figure square. 5x5 seems to work well. The max
             size is 256 kB. The default is None.
+        raise_errors : bool, optional
+            Will raise an OverflowError if the image provided is larger than 256 kB. The default is True.
         verbose : bool, optional
             Print status to console. The default is True.
 
@@ -461,6 +498,10 @@ class DanceDJ:
         None.
 
         """
+        
+        if not self._connect_to_spotipy:
+            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
+        
         
         # Validate the inputs
         if len(playlist_name) > 100:
@@ -483,20 +524,26 @@ class DanceDJ:
         # Upload the cover image
         if cover_image_b64 is not None:
             
+            attempt_image_upload = True
             # Check if it is a matplotlib figure that needs to be converted
             if isinstance(cover_image_b64, plt.Figure):
                 with io.BytesIO() as buffer:
                     cover_image_b64.savefig(buffer, format='jpeg')
                     
                     # Check if the buffer size is within the limit (256 KB)
-                    if buffer.tell() >= 256 * 1024:
+                    if buffer.tell() <= 256 * 1024:
+                        buffer.seek(0)  # Reset buffer position to start
+                        cover_image_b64 = base64.b64encode(buffer.getvalue()) # Encode the figure
+                    elif raise_errors:
                         raise OverflowError("The given figure is larger than 256 kB.")
-               
-                    buffer.seek(0)  # Reset buffer position to start
-                    cover_image_b64 = base64.b64encode(buffer.getvalue()) # Encode the figure
-            
-            # upload the figure
-            self._sp.playlist_upload_cover_image(playlist_id, cover_image_b64)
+                    else:
+                        attempt_image_upload = False
+                        
+                        if verbose:
+                            print("Cover image upload not attempted because the image is larger than 256 kB.")
+                
+            if attempt_image_upload:
+                self._sp.playlist_upload_cover_image(playlist_id, cover_image_b64)
         
         if verbose:
             print(f"Successfully created playlist: {playlist_name}")
@@ -778,3 +825,12 @@ class DanceDJ:
                     raise TypeError(
                         f"{variable_name} is of type {type(var)} when it should be one of {allowed_types}."
                     )
+                    
+########################################################################################################################
+# Custom Exception
+########################################################################################################################
+
+class SpotipyNotActivatedError(Exception):
+    """A custom exception for the DanceDJ class to be raised when someone attempts to use Spotipy functionality after
+    disabling Spotipy connectivity."""
+    pass
