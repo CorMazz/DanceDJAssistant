@@ -8,8 +8,10 @@ Created on Thu Jun 20 11:53:12 2024
 
 
 import os
-import numpy as np
 import sys
+import spotipy
+import numpy as np
+
 sys.path.append(r"C:\Users\mazzac3\Documents\GitHub\DanceDJAssistant\app\model")
 from djassistant import DanceDJ
 import matplotlib.pyplot as plt
@@ -35,10 +37,13 @@ pl_url = "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTU
 
 if __name__ == "__main__":
     
-    os.environ["SPOTIPY_CLIENT_ID"] = "b6eaa41c44d44f919fc2f49cba43767a"
-    os.environ["SPOTIPY_CLIENT_SECRET"] = "7b39402661b44941b2d8a2b1209a3797"
-    os.environ["SPOTIPY_REDIRECT_URI"] = "http://localhost:8080"
+    auth_manager = spotipy.oauth2.SpotifyOAuth(
+        client_id="b6eaa41c44d44f919fc2f49cba43767a",
+        client_secret="7b39402661b44941b2d8a2b1209a3797",
+        redirect_uri="http://localhost:8080",
+    )
     
+    spotify_obj = spotipy.Spotify(auth_manager=auth_manager)
     
     # Define your database connection URL
     DATABASE_URL = "sqlite:///test_only.db"
@@ -62,25 +67,25 @@ if __name__ == "__main__":
             
             
             "No Database": dict(
-                dj_obj=DanceDJ(),
+                dj_obj=DanceDJ(spotify_obj=spotify_obj),
                 playlist=pl_url,
                 n_songs=20,
             ),
       
             "Blank Database": dict(
-                dj_obj=DanceDJ(db_session=session),
+                dj_obj=DanceDJ(spotify_obj=spotify_obj, db_session=session),
                 playlist=pl_url,
                 n_songs=10,
             ),
             
             "Half Populated Database": dict(
-                dj_obj=DanceDJ(db_session=session),
+                dj_obj=DanceDJ(spotify_obj=spotify_obj, db_session=session),
                 playlist=pl_url,
                 n_songs=20,
             ),
             
             "Fully Populated Database": dict(
-                dj_obj=DanceDJ(db_session=session),
+                dj_obj=DanceDJ(spotify_obj=spotify_obj, db_session=session),
                 playlist=pl_url,
                 n_songs=20,
             ),

@@ -9,16 +9,15 @@ https://stackoverflow.com/questions/31948285/display-data-streamed-from-a-flask-
 https://medium.com/@ruixdsgn/a-guide-to-implementing-oauth-authorization-using-spotipy-for-a-playlist-generator-app-6ab50cdf6c3
 """
 
-import os
 import json
 import base64
-import numpy as np
+import spotipy
 import pandas as pd
 from .extensions import db
 from io import BytesIO, StringIO
 from .model.djassistant import DanceDJ
-from flask import (Blueprint, render_template, request, flash, redirect, url_for, session, jsonify)
-
+from .auth_controller import get_token, create_spotify_object, create_spotipy_oauth, AuthorizationError
+from flask import (Blueprint, render_template, request, flash, redirect, url_for, session, current_app)
 
 
 playlist_analyzer = Blueprint('playlist_analyzer', __name__)
@@ -35,14 +34,15 @@ def select_playlist():
         if "spotify" not in (link := request.form['playlist-link']):
             flash("This must be a spotify link (looking for the word 'spotify' in the url).", "error")
         else:
-            os.environ["SPOTIPY_CLIENT_ID"] = "b6eaa41c44d44f919fc2f49cba43767a"
-            os.environ["SPOTIPY_CLIENT_SECRET"] = "7b39402661b44941b2d8a2b1209a3797"
-            os.environ["SPOTIPY_REDIRECT_URI"] = "http://localhost:8080"
+            
+            # Don't need scope for reading public playlists
+            dj = DanceDJ(spotify_obj=spotipy.Spotify(auth_manager=create_spotipy_oauth(scope="")))
+            
             session['playlist-link'] = link
-            session['songs'] = DanceDJ().parse_playlist(link)
+            session['songs'] = dj.parse_playlist(link)
             return redirect(url_for("playlist_analyzer.view_playlist"))
         
-    # Otherwise it's a get request. 
+    # Otherwise it's a get request
     return render_template('select-playlist.html')
 
 
@@ -77,7 +77,13 @@ def analyze_playlist():
         
         # TODO add the progress bar to the flask app
         
-        processed_playlist =  DanceDJ(db_session=db.session).analyze_songs(
+        # Don't need scope for analyzing songs
+        dj = DanceDJ(
+            spotify_obj=spotipy.Spotify(auth_manager=create_spotipy_oauth(scope="")), 
+            db_session=db.session
+        )
+        
+        processed_playlist =  dj.analyze_songs(
             songs.keys(), 
             songs.values(),
             desired_info=(
@@ -116,10 +122,12 @@ def define_profile():
         profile_plot, fit_playlist, rearranged_playlist = None, None, None
         
         if request.method == "POST":
-            dj = DanceDJ(connect_to_spotipy=False)
+            
+            # Don't need spotipy to create a profile or fit the playlist to the profile
+            dj = DanceDJ(spotify_obj=None)
             
             profile_kwargs = dict(                
-                tempo_bounds=(int(request.form.get("min_bpm", 0)), int(request.form.get("max_bpm", 0))),
+                tempo_bounds=(int(request.form.get("min_bpm", 70)), int(request.form.get("max_bpm", 130))),
                 n_cycles=float(request.form.get("n_cycles", 1)), 
                 horizontal_shift=float(request.form.get("horizontal_shift", 0)),
                 n_songs=n_songs,
@@ -161,7 +169,7 @@ def define_profile():
             "define-profile.html", 
             form_data=request.form, 
             profile_plot=profile_plot, 
-            continue_button_active="btn btn-primary" if fit_playlist is not None else "btn btn-secondary"
+            continue_button_active= True if fit_playlist is not None else False
         )
         return return_value
         
@@ -169,27 +177,51 @@ def define_profile():
 # 
 # ----------------------------------------------------------------------------------------------------------------------
     
-@playlist_analyzer.route('/upload-playlist', methods=['GET'])
+@playlist_analyzer.route('/upload-playlist', methods=['POST', 'GET'])
 def upload_playlist():
     if (
             (rearranged_playlist := session.get("rearranged-playlist")) is None 
             or (target_profile_kwargs := session.get("target-profile-kwargs")) is None 
-            or not (n_songs := len(session.get('songs', 0)))
+            or not (len(session.get('songs', 0)))
             
         ):
         flash("No playlist has been rearranged. Returning to define profile page.", "error")
         return redirect(url_for("playlist_analyzer.define_profile"))
     
-    dj = DanceDJ()
+    # Don't need spotipy to create a profile or fit the playlist to the profile
+    dj = DanceDJ(spotify_obj=None)
     
     # convert the rearranged playlist and target profile back from json
     rearranged_playlist = pd.read_json(StringIO(rearranged_playlist))
     target_profile_kwargs = json.loads(target_profile_kwargs)
     target_profile = dj.generate_sinusoidal_profile(**target_profile_kwargs)
-    print("Went to the upload playlist page.")
     
-    return redirect(url_for("playlist_analyzer.select_playlist"))
+    fig, ax = dj.plot_profile_matplotlib(target_profile=target_profile, analyzed_playlist=rearranged_playlist)
     
+    # Convert the image to bytes so I can ship it off to the HTML and render it
+    figfile = BytesIO()
+    fig.savefig(figfile, format='png')
+    figfile.seek(0)  # rewind to beginning of file
+
+    profile_plot = base64.b64encode(figfile.getvalue()).decode('utf8')
     
+    if request.method == "POST":  # The name must be filled out to submit a post request
+        
+        try:
+            dj = DanceDJ(spotify_obj=create_spotify_object(session))
+        except AuthorizationError:
+            print("Not authorized, redirecting")
+            return redirect(url_for('auth.grant_spotify_access'))
+        
+        flash("Authorized, attempting to upload.", "success")
+        
+        playlist_url = dj.save_playlist(request.form.get("playlist_name"), list(rearranged_playlist.index),) #cover_image_b64=fig)
+        
+        return render_template('wait-for-playlist.html', playlist_url=playlist_url)
+    
+
+    return render_template("upload-playlist.html", form_data=request.form, profile_plot=profile_plot)
+    
+
     
     

@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from .extensions import db, db_name
 from .model_controller import playlist_analyzer
+from .auth_controller import auth
 from flask import Flask, render_template
 
 ########################################################################################################################
@@ -16,6 +17,9 @@ def create_app(test_config=None):
         SECRET_KEY="dev",
         SQLALCHEMY_DATABASE_URI=f'sqlite:///{db_name}',
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SPOTIPY_CLIENT_ID="b6eaa41c44d44f919fc2f49cba43767a",
+        SPOTIPY_CLIENT_SECRET= "7b39402661b44941b2d8a2b1209a3797",  # Refresh me before making public
+        SPOTIPY_REDIRECT_URI= "http://127.0.0.1:5000/spotify-api-callback",
         
     )
     
@@ -41,6 +45,7 @@ def create_app(test_config=None):
     
 
     app.register_blueprint(playlist_analyzer)
+    app.register_blueprint(auth)
     
     return app
 

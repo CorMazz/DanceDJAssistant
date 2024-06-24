@@ -81,15 +81,22 @@ class DanceDJ:
     def __init__(
             self, 
             scope="playlist-modify-public playlist-modify-private ugc-image-upload", 
-            retry_config: dict | None = None,
+            spotify_obj: spotipy.Spotify | None = None,
             db_session: None = None,
-            spotipy_oauth_kwargs: dict | None = None,
-            connect_to_spotipy: bool = True
+            retry_config: dict | None = None,
         ):
         """
-        Instantiates a connection to the Spotify API. See the Spotipy documentation to learn 
-        about the authorization scope.
-        
+        Initializes the class instance.
+
+        spotify_obj : spotipy.Spotify | None = None
+            A spotipy.Spotify object with the following scope:
+                "playlist-modify-public playlist-modify-private ugc-image-upload"
+                
+        db_session : sqlalchemy.Session | None, optional
+            An optional sqlalchemy.Session object to use as a database to implement song caching. Creates a table called
+            djassistant_songs if it does not already exist. The default is None, meaning no caching is implemented. 
+            Currently the database stores a song URL as the primary key, it's tempo in BPM, and it's duration.      
+            
         retry_config : dict, optional
             A dict of kwargs fed to the Tenacity retry decorator wrapping Spotipy's finnicky audio_analysis method. 
             Default is None, which leads to the following retry settings: 
@@ -98,40 +105,16 @@ class DanceDJ:
                     'wait': wait_exponential(multiplier=1, min=4, max=10)
                 }
                 
-        db_session : sqlalchemy.Session | None, optional
-            An optional sqlalchemy.Session object to use as a database to implement song caching. Creates a table called
-            djassistant_songs if it does not already exist. The default is None, meaning no caching is implemented. 
-            Currently the database stores a song URL as the primary key, it's tempo in BPM, and it's duration.      
-            
-        spotipy_oauth_kwargs : dict | None, optional
-            Keyword arguments to be fed to the spotipy.SpotifyOAuth class. Requires: 
-                client_id
-                client_secret
-                redirect_uri
-            If not provided, assumes that these are set using environment variables. 
-            
-            See the Spotipy documentation for more information. 
-            https://spotipy.readthedocs.io/en/2.24.0/#spotipy.oauth2.SpotifyOAuth
-            
-        connect_to_spotipy : bool, optional
-            Chose whether to connect to the Spotipy API. If you don't need the Spotipy API functionality and just need
-            the plotting or rearranging functionality, you can disable the SpotipyOAuth logic. The default is True.      
 
         """
-
-        self._connect_to_spotipy = connect_to_spotipy
 
         self.__validate_variable_types([
             ("scope", scope, str),
             ("retry_config", retry_config, (dict, NoneType)),
-            ("spotipy_oauth_kwargs", spotipy_oauth_kwargs, (dict, NoneType)),
-            ("connect_to_spotipy", connect_to_spotipy, bool),
+            ("spotify_obj", spotify_obj, (spotipy.Spotify, NoneType)),
         ])
-        
-        spotipy_oauth_kwargs = spotipy_oauth_kwargs or {}
 
-        if self._connect_to_spotipy:
-            self._sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope, **spotipy_oauth_kwargs))
+        self._sp = spotify_obj
         
         if not isinstance(retry_config, (dict, NoneType)):
             raise TypeError(f"retry_config is of type {type(retry_config)} when it should be a dict or None.")
@@ -175,8 +158,8 @@ class DanceDJ:
     
         """
         
-        if not self._connect_to_spotipy:
-            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
+        if self._sp is None:
+            raise SpotifyNotActivatedError("This DanceDJ instance was initialized without a Spotify object.")
         
         # Get the total number of tracks in the playlist
         playlist = self._sp.playlist(playlist_id)
@@ -308,8 +291,8 @@ class DanceDJ:
         
         # Initialize a dictionary to hold the analyses for a given song
         
-        if new_songs and not self._connect_to_spotipy:
-            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
+        if new_songs and self._sp is None:
+            raise SpotifyNotActivatedError("This DanceDJ instance was initialized without a Spotify object.")
         
         analyses = {song_id: self.robust_audio_analysis(song_id) 
                     for song_id in iterator}
@@ -471,7 +454,7 @@ class DanceDJ:
             cover_image_b64: bytes | plt.Figure | None = None,
             raise_errors: bool = True,
             verbose: bool = True,
-            ):
+            ) -> str:
         """
         Save the playlist by uploading it to your Spotify account. Can optionally add a playlist
         description and cover image.
@@ -495,12 +478,12 @@ class DanceDJ:
 
         Returns
         -------
-        None.
+        The playlist URL
 
         """
         
-        if not self._connect_to_spotipy:
-            raise SpotipyNotActivatedError("This DanceDJ instance was initialized with 'connect_to_spotipy=False'.")
+        if self._sp is None:
+            raise SpotifyNotActivatedError("This DanceDJ instance was initialized without a Spotify object.")
         
         
         # Validate the inputs
@@ -548,6 +531,7 @@ class DanceDJ:
         if verbose:
             print(f"Successfully created playlist: {playlist_name}")
         
+        return playlist_id
 # ----------------------------------------------------------------------------------------------------------------------
 # Adjust Tempo
 # ----------------------------------------------------------------------------------------------------------------------
@@ -830,7 +814,7 @@ class DanceDJ:
 # Custom Exception
 ########################################################################################################################
 
-class SpotipyNotActivatedError(Exception):
+class SpotifyNotActivatedError(Exception):
     """A custom exception for the DanceDJ class to be raised when someone attempts to use Spotipy functionality after
     disabling Spotipy connectivity."""
     pass
