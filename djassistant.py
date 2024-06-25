@@ -8,6 +8,16 @@ TODO:
     
     Add the capability to create interactive plotly plots describing the playlist. Hovertext containing key info about
     the songs.
+
+    Refactor this such that I separate the different possible modes of DJ operation into different classes:
+        class BaseDanceDJ
+            ...
+
+        class DataBaseEnabledDanceDJ
+            ...
+        
+        class SpotipyEnabledDanceDJ
+            ...
 """
 
 import os
