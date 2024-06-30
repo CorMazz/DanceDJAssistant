@@ -161,3 +161,4 @@ cython_debug/
 
 # Ignore the cache
 cache/
+tests/test_only.db

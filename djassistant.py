@@ -4,7 +4,7 @@ Created on Wed Nov 22 18:28:03 2023
 
 @author: mazzac3
 
-TODO:
+Possible Improvements:
     
     Add the capability to create interactive plotly plots describing the playlist. Hovertext containing key info about
     the songs.
@@ -18,6 +18,9 @@ TODO:
         
         class SpotipyEnabledDanceDJ
             ...
+            
+    Refactor this to have methods which return Dataclasses where necesssary. 
+            
 """
 
 import os
@@ -29,6 +32,7 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 import matplotlib.pyplot as plt
+from dataclasses import dataclass
 from spotipy.oauth2 import SpotifyOAuth
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
@@ -85,6 +89,10 @@ if db_enabled:
                 return_val.update(dict(url=self.url))
             return return_val
 
+
+########################################################################################################################
+# Optional Database Functionality
+########################################################################################################################
 
 class DanceDJ:
     
@@ -148,10 +156,15 @@ class DanceDJ:
 ########################################################################################################################
 
 # ----------------------------------------------------------------------------------------------------------------------
-# Parse Playlist
+# Parse RawPlaylist
 # ----------------------------------------------------------------------------------------------------------------------
 
-    def parse_playlist(self, playlist_id: str, max_tracks: int = 5e3):
+    def parse_playlist(
+            self,
+            playlist_id: str, 
+            max_tracks: int = 5e3,
+            return_api_response: bool = False
+        ) -> dict | tuple[dict, dict]:
         """
         Parse a given playlist and grab the IDs and names of it's songs.
     
@@ -159,13 +172,19 @@ class DanceDJ:
         ----------
         playlist_id : str
             The Spotify ID of a playlist. Can be a url. 
-    
+        max_tracks : int, optional
+            The maximum number of tracks to parse from the playlist (default is 5000).
+        return_api_response : bool, optional
+            Return the response of the call to Spotify's Get Playlist API. Default is False
         Returns
         -------
         parsed_songs : dict
             A dictionary where the key is the url for a song, and the value is the song name. 
             This was on purpose, since urls are unique, as keys need to be. 
     
+        if return_api_response:
+            Returns a tuple where the second object is a dictionary with Spotify's API response. Some useful parameters 
+            in that dictionary may be name and description. 
         """
         
         if self._sp is None:
@@ -197,6 +216,9 @@ class DanceDJ:
     
             # Increment the offset for the next batch
             offset += limit
+            
+        if return_api_response:
+            return parsed_songs, playlist
             
         return parsed_songs
     
@@ -735,7 +757,7 @@ class DanceDJ:
                 )
                 
             analyzed_playlist_kwargs = (
-                dict(label="Playlist Profile", color="b", marker="^", linestyle="-") | (analyzed_playlist_kwargs or {})
+                dict(label="RawPlaylist Profile", color="b", marker="^", linestyle="-") | (analyzed_playlist_kwargs or {})
             )
             
             ax.plot(

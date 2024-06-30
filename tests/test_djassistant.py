@@ -12,7 +12,7 @@ import sys
 import spotipy
 import numpy as np
 
-sys.path.append(r"C:\Users\mazzac3\Documents\GitHub\DanceDJAssistant\app\model")
+sys.path.append(r"C:\Users\mazzac3\Documents\GitHub\DanceDJAssistant")
 from djassistant import DanceDJ
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error
@@ -22,6 +22,41 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
 from contextlib import contextmanager
 
+def load_dev_env_variables(env_file=".env"):
+    """
+    Load environment variables from a .env file if it exists. This is for easier development. My dev environment will 
+    have the .env file available, but the docker container will not have the file. 
+
+    Parameters
+    ----------
+    env_file : str, optional
+        The path to the .env file (default is ".env").
+
+    Returns
+    -------
+    None
+    """
+    if os.path.exists(env_file):
+        with open(env_file) as f:
+            for line in f:
+                # Strip whitespace and ignore comments and empty lines
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                # Split the line into key and value
+                key, value = line.split('=', 1)
+
+                # Remove potential leading/trailing whitespace and enclosing quotes
+                key = key.strip()
+                value = value.strip().strip('\'"')
+
+                # Set the environment variable
+                os.environ[key] = value
+
+        print(f"Loaded environment variables from {env_file}")
+    else:
+        print(f"No .env file found at {env_file}")
 
 
 
@@ -37,9 +72,11 @@ pl_url = "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTU
 
 if __name__ == "__main__":
     
+    load_dev_env_variables(r"C:\Users\mazzac3\Documents\GitHub\dance-dj-webapp\.env")
+    
     auth_manager = spotipy.oauth2.SpotifyOAuth(
-        client_id="b6eaa41c44d44f919fc2f49cba43767a",
-        client_secret="7b39402661b44941b2d8a2b1209a3797",
+        client_id=os.environ["SPOTIPY_CLIENT_ID"],
+        client_secret=os.environ["SPOTIPY_CLIENT_SECRET"],
         redirect_uri="http://localhost:8080",
     )
     
@@ -104,6 +141,9 @@ if __name__ == "__main__":
         
             # Parse the given playlist
             playlist_songs = dj.parse_playlist(playlist_id=playlist)
+            
+            # Make sure this functionality works
+            playlist_object= dj.parse_playlist(playlist_id=playlist, return_api_response=True)[1]
             
             # Truncate down to n songs
             playlist_songs = dict(list(playlist_songs.items())[:n_songs])
