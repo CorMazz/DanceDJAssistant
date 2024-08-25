@@ -9,16 +9,6 @@ Possible Improvements:
     Add the capability to create interactive plotly plots describing the playlist. Hovertext containing key info about
     the songs.
 
-    Refactor this such that I separate the different possible modes of DJ operation into different classes:
-        class BaseDanceDJ
-            ...
-
-        class DataBaseEnabledDanceDJ
-            ...
-        
-        class SpotipyEnabledDanceDJ
-            ...
-            
     Refactor this to have methods which return Dataclasses where necesssary. 
             
 """
@@ -31,11 +21,14 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
+import plotly.express as px
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
+import plotly.graph_objects as go
 from spotipy.oauth2 import SpotifyOAuth
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
+
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 
@@ -67,6 +60,8 @@ if db_enabled:
         url = Column(String(300), primary_key=True)
         tempo = Column(Float)
         duration = Column(Float)
+        key = Column(Integer)
+        time_signature = Column(Integer)
         
         def to_dict(self, include_url: bool = True):
             """
@@ -83,7 +78,7 @@ if db_enabled:
                 A dictionary of the parameters in the class. 
 
             """
-            return_val = dict(tempo=self.tempo,duration=self.duration)
+            return_val = dict(tempo=self.tempo,duration=self.duration, key=self.key, time_signature=self.time_signature)
             
             if include_url:
                 return_val.update(dict(url=self.url))
@@ -119,8 +114,8 @@ class DanceDJ:
             A dict of kwargs fed to the Tenacity retry decorator wrapping Spotipy's finnicky audio_analysis method. 
             Default is None, which leads to the following retry settings: 
                 {
-                    'stop': stop_after_attempt(3),
-                    'wait': wait_exponential(multiplier=1, min=4, max=10)
+                    'stop': tenacity.stop_after_attempt(3),
+                    'wait': tenacity.wait_exponential(multiplier=1, min=4, max=10)
                 }
                 
 
@@ -148,6 +143,22 @@ class DanceDJ:
             inspector = inspect(engine)
             if not inspector.has_table("djassistant_songs"):
                 Base.metadata.create_all(engine)
+                
+        # Key mapping to go from spotify integer keys to traditional letter keys
+        self.key_mapping = {
+            0: 'C',
+            1: 'C♯/D♭',
+            2: 'D',
+            3: 'D♯/E♭',
+            4: 'E',
+            5: 'F',
+            6: 'F♯/G♭',
+            7: 'G',
+            8: 'G♯/A♭',
+            9: 'A',
+            10: 'A♯/B♭',
+            11: 'B'
+        }
                     
             
         
@@ -235,11 +246,8 @@ class DanceDJ:
         adjust_tempo: tuple[int, int] | None = (60, 130),
         desired_info: tuple[str] = (
             "tempo",
-            "tempo_confidence",
             "key",
-            "key_confidence",
             "time_signature", 
-            "time_signature_confidence",
             "duration",
             
         ),
@@ -270,11 +278,8 @@ class DanceDJ:
             The default is
             (
                 "tempo",
-                "tempo_confidence",
                 "key",
-                "key_confidence",
                 "time_signature", 
-                "time_signature_confidence",
                 "duration",
             )
         
@@ -326,19 +331,33 @@ class DanceDJ:
         if new_songs and self._sp is None:
             raise SpotifyNotActivatedError("This DanceDJ instance was initialized without a Spotify object.")
         
-        analyses = {song_id: self.robust_audio_analysis(song_id) 
-                    for song_id in iterator}
+        analyses = {}
         
-        # Store the new songs in the database
-        if self._db_session is not None and save_to_db and analyses:
+        for song_id in iterator:
+            try:
+                analyses[song_id] = self.robust_audio_analysis(song_id) 
             
-            # Prepare data for database storage
-            new_songs_to_save = [
-                Song(**{'url': song_id, 'tempo': analysis['track']['tempo'], 'duration': analysis['track']['duration']})
-                for song_id, analysis in analyses.items()]
-
-                
-            self._db_session.add_all(new_songs_to_save)
+                # Store the new songs in the database
+                if self._db_session is not None and save_to_db:
+                    
+                    # Prepare data for database storage
+                    
+                    song = Song(**{
+                        'url': song_id, 
+                        'tempo': analyses[song_id]['track']['tempo'],
+                        'duration': analyses[song_id]['track']['duration'],
+                        'key': analyses[song_id]['track']['key'],
+                        'time_signature': analyses[song_id]['track']['time_signature'],
+                        }
+                    )
+                    
+                    self._db_session.add(song)
+            except Exception as e:
+                if self._db_session is not None and save_to_db:
+                    self._db_session.commit()
+                raise e
+            
+        if self._db_session is not None and save_to_db:
             self._db_session.commit()
             
         # Get a summary of the information for all of these songs in a single dataframe
@@ -377,7 +396,7 @@ class DanceDJ:
             self, 
             tempo_profile: np.ndarray, 
             song_summary_df: pd.DataFrame,
-            method: str = "naive",
+            method: str = "upsampled_euclidean",
             plot_results: bool = True,
             ) -> pd.DataFrame:
         """
@@ -387,7 +406,9 @@ class DanceDJ:
         Parameters
         ----------
         tempo_profile : np.ndarray
-            A 1D array of target tempo values for each song.
+            A 1D array of target tempo values for each song. This can be longer than the number of songs, since the 
+            Euclidean and upsampled Euclidean methods will try to rearrange the playlist such that the global error is
+            minimized. 
         song_summary_df : pd.DataFrame
             A DataFrame with a "tempo" column which contains the BPM information for the song.
         method : str
@@ -418,7 +439,15 @@ class DanceDJ:
 
         """
         
+        if tempo_profile.ndim > 1:
+            raise ValueError("tempo_profile must be a 0D or 1D Numpy array but it is of ndim = {tempo_profile.ndim}")
+        
+        
         if method == "naive":
+            
+            if len(tempo_profile) != len(song_summary_df):
+                raise ValueError("The number of points in the profile must exactly match the number of songs in the "
+                                 "playlist for the naive method.")
             
             # Initialize a list
             selected_songs = []
@@ -610,6 +639,7 @@ class DanceDJ:
             n_cycles: float, 
             horizontal_shift: float, 
             n_songs: int,
+            damping_coefficient: float = 0,
             n_points: int | None = None
         ) -> np.ndarray:
         """
@@ -630,6 +660,10 @@ class DanceDJ:
             The horizontal shift applied to the sinusoidal function.
         n_songs : int
             The number of songs in the generated profile.
+        damping_coefficient: float, optional
+            The c in the equation y = Aexp(-cx) to be multiplied by the sinusoidal profile to implement damping.
+            This is useful for making a playlist that becomes one medium tempo as the night goes on. By default is 0,
+            which is no damping. 
         n_points : int or None, optional
             The number of points to put in the sinusoidal profile. Default is None, which is equivalent to n_songs. 
             Must be greater than n_songs if provided, or will default to n_songs. 
@@ -649,11 +683,14 @@ class DanceDJ:
         amplitude = (tempo_bounds[1] - tempo_bounds[0]) / 2
         mean = np.mean(tempo_bounds)
         x = np.linspace(0, n_songs - 1, n_points)
-        y = amplitude * np.sin(2 * np.pi * n_cycles * (x / (n_songs - 1)) + horizontal_shift * 2 * np.pi) + mean
+        y = amplitude * np.sin(2 * np.pi * n_cycles * (x / (n_songs - 1)) + horizontal_shift * 2 * np.pi)
+        y *= np.exp( - damping_coefficient*x)
+        y += mean
+        
         return np.column_stack((x + 1, y))
         
 # ----------------------------------------------------------------------------------------------------------------------
-# Plot Profile
+# Plot Profile Matplotlib
 # ----------------------------------------------------------------------------------------------------------------------
 
     def plot_profile_matplotlib(
@@ -724,7 +761,8 @@ class DanceDJ:
         """
         
         self.__validate_variable_types([
-            ("target_profile", target_profile, np.ndarray),
+            ("target_profile", target_profile, (np.ndarray, NoneType)),
+            ("analyzed_playlist", analyzed_playlist, (pd.DataFrame, NoneType)),
             ("fig_kwargs", fig_kwargs, (dict, NoneType)),
             ("target_profile_kwargs", target_profile_kwargs, (dict, NoneType)),
             ("analyzed_playlist_kwargs", analyzed_playlist_kwargs, (dict, NoneType)),
@@ -781,10 +819,168 @@ class DanceDJ:
             
         ax.set_ylabel("Tempo (BPM)")
         ax.set_xlabel("Song Number")
-        ax.legend()
+        ax.legend(loc="upper right")
         
         return fig, ax
         
+      
+# ----------------------------------------------------------------------------------------------------------------------
+# Plot Profile Plotly
+# ----------------------------------------------------------------------------------------------------------------------  
+    
+    def plot_playlist_plotly(
+            self, 
+            analyzed_playlist: pd.DataFrame | None = None, 
+            target_profile: np.ndarray | None = None,
+            target_profile_kwargs: dict | None = None,
+            update_layout_kwargs: dict | None = None,
+            fig: go.Figure | None = None,
+        ) -> go.Figure:
+        """
+        Plot the analyzed playlist tempo profile and optionally a target profile using Plotly.
+    
+        This function creates a Plotly plot of the given analyzed playlist's tempo profile. Optionally, a target tempo
+        profile can be added to the plot for comparison. The plot can be customized with additional keyword arguments 
+        for the target profile and layout.
+    
+        Parameters
+        ----------
+        analyzed_playlist : pd.DataFrame or None, optional
+            A DataFrame with information about the analyzed playlist. At a minimum, it needs to have columns for 
+            'duration', 'tempo', 'key', and 'tempo_adjustment_factor'. Other columns will be used for hover text.
+        target_profile : np.ndarray or None, optional
+            An 1 or 2D array containing the tempo profile to be plotted. If 2D, the first column is x, the second is y.
+            If 1D, assumes that the x-values are defined by np.arange(1, len(target_profile)).
+        target_profile_kwargs : dict or None, optional
+            A dictionary of keyword arguments to be passed to `go.Scatter` for customizing the target profile plot.
+            Default is None.
+        update_layout_kwargs : dict or None, optional
+            A dictionary of keyword arguments to be passed to `fig.update_layout` for customizing the plot layout.
+            Default is None.
+        fig : go.Figure or None, optional
+            A Plotly Figure object to create the plot on. If None is provided, a new figure will be created.
+    
+        Returns
+        -------
+        fig : go.Figure
+            The Plotly figure object containing the plot.
+    
+        Examples
+        --------
+        >>> dj = DanceDJ()
+        >>> playlist = dj.analyze_playlist('my_playlist')
+        >>> fig = dj.plot_playlist_plotly(playlist)
+        >>> fig.show()
+    
+        Notes
+        -----
+        The function uses default plot settings, which can be overridden by providing `target_profile_kwargs` and 
+        `update_layout_kwargs`. If no customization is provided, the plot will use the default settings:
+        
+        - `target_profile_kwargs`: {'name': 'Target Profile', 'mode': 'lines', 'line': {'color': 'black'}}
+        - `update_layout_kwargs`: {
+            'xaxis_title': 'Song Index', 
+            'yaxis_title': 'Tempo (BPM)',
+            'title': 'Playlist Tempo Analysis',
+            'template': 'plotly_white'
+            }
+    
+        The function also validates the types of the input variables before proceeding with plotting.
+        """
+        
+        self.__validate_variable_types([
+            ("target_profile", target_profile, (np.ndarray, NoneType)),
+            ("analyzed_playlist", analyzed_playlist, (pd.DataFrame, NoneType)),
+            ("update_layout_kwargs", update_layout_kwargs, (dict, NoneType)),
+            ("target_profile_kwargs", target_profile_kwargs, (dict, NoneType)),
+            ("fig", fig, (go.Figure, NoneType)),
+        ])
+        
+        # Create teh figure object if it was not provided
+        fig = fig or go.Figure()
+        
+        if analyzed_playlist is not None:
+            playlist = analyzed_playlist.copy()
+            
+            # Calculate the cumulative runtime of the songs
+            playlist['Song Start Time'] = playlist['duration'].cumsum()
+            
+            # Rename columns to have title capitalization and units
+            playlist.rename(columns={
+                'duration': 'Duration (mm:ss)',
+                'tempo': 'Tempo (BPM)',
+                'key': 'Key',
+                'tempo_adjustment_factor': 'Tempo Adjustment Factor'
+            }, inplace=True)
+            
+            # Format the Song Start Time into a string of hh:mm:ss
+            playlist['Song Start Time'] = pd.to_datetime(playlist['Song Start Time'], unit='s').dt.strftime('%H:%M:%S')
+            
+            # Convert the duration into a string of mm:ss
+            playlist['Duration (mm:ss)'] = (pd.to_datetime(playlist['Duration (mm:ss)'], unit='s')
+                                            .dt.strftime('%M:%S'))
+            
+            # Convert the key from an integer into a string using your mapping dictionary
+            playlist["Key"] = playlist["Key"].replace(self.key_mapping)
+            
+            # Prepare data for the plot
+            x_values = np.arange(1, len(playlist) + 1)
+            y_values = playlist['Tempo (BPM)']
+            colors = ['#EF553B' if taf != 1 else '#636EFA' for taf in playlist['Tempo Adjustment Factor']]
+            symbols = ['diamond' if taf != 1 else 'circle' for taf in playlist['Tempo Adjustment Factor']]
+            
+            hover_texts = [
+                f"<b>Title: {row['name']}</b><br>"
+                f"Song Number: {i + 1}<br>"
+                f"Song Start Time: {row['Song Start Time']}<br>"
+                f"Tempo (BPM): {round(row['Tempo (BPM)'])}<br>"
+                f"Key: {row['Key']}<br>"
+                f"Duration (mm:ss): {row['Duration (mm:ss)']}<br>"
+                f"Tempo Adjustment Factor: {row['Tempo Adjustment Factor']}"
+                for i, (_, row) in enumerate(playlist.iterrows())
+            ]
+            
+            
+            # Add a single trace
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values,
+                    y=y_values,
+                    mode='lines+markers',
+                    marker=dict(color=colors, symbol=symbols, size=10),
+                    hoverinfo='text',
+                    hovertext=hover_texts,
+                    name="Analyzed Playlist",
+                )
+            )
+            
+        if target_profile is not None:
+
+            # Define default target_profile_kwargs and update with function inputs
+            target_profile_kwargs = (
+                dict(name="Target Profile", mode="lines", line=dict(color="black")) | (target_profile_kwargs or {})
+            )
+            if target_profile.ndim == 1:
+                fig.add_trace(go.Scatter(y=target_profile, **target_profile_kwargs))
+            elif target_profile.ndim == 2:
+                fig.add_trace(go.Scatter(x=target_profile[:, 0], y=target_profile[:, 1], **target_profile_kwargs))
+            else:
+                raise ValueError("Target profile must not be greater than 2D. ")
+        
+        update_layout_kwargs = (
+            dict(
+                xaxis_title='Song Index',
+                yaxis_title='Tempo (BPM)',
+                title='Playlist Tempo Analysis',
+                template="plotly_white",
+            ) | (update_layout_kwargs or {})
+        )
+        fig.update_layout(**update_layout_kwargs)
+        
+        return fig
+    
+    
+    
 # ----------------------------------------------------------------------------------------------------------------------
 # Validate Variable Types
 # ----------------------------------------------------------------------------------------------------------------------
