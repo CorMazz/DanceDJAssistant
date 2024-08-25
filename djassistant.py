@@ -331,9 +331,6 @@ class DanceDJ:
         if new_songs and self._sp is None:
             raise SpotifyNotActivatedError("This DanceDJ instance was initialized without a Spotify object.")
         
-        analyses = {song_id: self.robust_audio_analysis(song_id) 
-                    for song_id in iterator}
-        
         analyses = {}
         
         for song_id in iterator:
@@ -345,22 +342,23 @@ class DanceDJ:
                     
                     # Prepare data for database storage
                     
-                    song = [
-                        Song(**{
-                            'url': song_id, 
-                            'tempo': analyses['song_id']['track']['tempo'],
-                            'duration': analyses['song_id']['track']['duration'],
-                            'key': analyses['song_id']['track']['key'],
-                            'time_signature': analyses['song_id']['track']['time_signature'],
-                            }
-                        )
-                    ]
+                    song = Song(**{
+                        'url': song_id, 
+                        'tempo': analyses[song_id]['track']['tempo'],
+                        'duration': analyses[song_id]['track']['duration'],
+                        'key': analyses[song_id]['track']['key'],
+                        'time_signature': analyses[song_id]['track']['time_signature'],
+                        }
+                    )
                     
                     self._db_session.add(song)
             except Exception as e:
                 if self._db_session is not None and save_to_db:
                     self._db_session.commit()
                 raise e
+            
+        if self._db_session is not None and save_to_db:
+            self._db_session.commit()
             
         # Get a summary of the information for all of these songs in a single dataframe
         new_song_summary = pd.concat(
@@ -641,6 +639,7 @@ class DanceDJ:
             n_cycles: float, 
             horizontal_shift: float, 
             n_songs: int,
+            damping_coefficient: float = 0,
             n_points: int | None = None
         ) -> np.ndarray:
         """
@@ -661,6 +660,10 @@ class DanceDJ:
             The horizontal shift applied to the sinusoidal function.
         n_songs : int
             The number of songs in the generated profile.
+        damping_coefficient: float, optional
+            The c in the equation y = Aexp(-cx) to be multiplied by the sinusoidal profile to implement damping.
+            This is useful for making a playlist that becomes one medium tempo as the night goes on. By default is 0,
+            which is no damping. 
         n_points : int or None, optional
             The number of points to put in the sinusoidal profile. Default is None, which is equivalent to n_songs. 
             Must be greater than n_songs if provided, or will default to n_songs. 
@@ -680,7 +683,10 @@ class DanceDJ:
         amplitude = (tempo_bounds[1] - tempo_bounds[0]) / 2
         mean = np.mean(tempo_bounds)
         x = np.linspace(0, n_songs - 1, n_points)
-        y = amplitude * np.sin(2 * np.pi * n_cycles * (x / (n_songs - 1)) + horizontal_shift * 2 * np.pi) + mean
+        y = amplitude * np.sin(2 * np.pi * n_cycles * (x / (n_songs - 1)) + horizontal_shift * 2 * np.pi)
+        y *= np.exp( - damping_coefficient*x)
+        y += mean
+        
         return np.column_stack((x + 1, y))
         
 # ----------------------------------------------------------------------------------------------------------------------
@@ -813,7 +819,7 @@ class DanceDJ:
             
         ax.set_ylabel("Tempo (BPM)")
         ax.set_xlabel("Song Number")
-        ax.legend()
+        ax.legend(loc="upper right")
         
         return fig, ax
         
@@ -824,7 +830,7 @@ class DanceDJ:
     
     def plot_playlist_plotly(
             self, 
-            analyzed_playlist: pd.DataFrame, 
+            analyzed_playlist: pd.DataFrame | None = None, 
             target_profile: np.ndarray | None = None,
             target_profile_kwargs: dict | None = None,
             update_layout_kwargs: dict | None = None,
@@ -839,7 +845,7 @@ class DanceDJ:
     
         Parameters
         ----------
-        analyzed_playlist : pd.DataFrame
+        analyzed_playlist : pd.DataFrame or None, optional
             A DataFrame with information about the analyzed playlist. At a minimum, it needs to have columns for 
             'duration', 'tempo', 'key', and 'tempo_adjustment_factor'. Other columns will be used for hover text.
         target_profile : np.ndarray or None, optional
@@ -883,8 +889,8 @@ class DanceDJ:
         """
         
         self.__validate_variable_types([
-            ("target_profile", target_profile, np.ndarray),
-            ("analyzed_playlist", analyzed_playlist, (pd.DataFrame)),
+            ("target_profile", target_profile, (np.ndarray, NoneType)),
+            ("analyzed_playlist", analyzed_playlist, (pd.DataFrame, NoneType)),
             ("update_layout_kwargs", update_layout_kwargs, (dict, NoneType)),
             ("target_profile_kwargs", target_profile_kwargs, (dict, NoneType)),
             ("fig", fig, (go.Figure, NoneType)),
@@ -893,60 +899,61 @@ class DanceDJ:
         # Create teh figure object if it was not provided
         fig = fig or go.Figure()
         
-        playlist = analyzed_playlist.copy()
-        
-        # Calculate the cumulative runtime of the songs
-        playlist['Song Start Time'] = playlist['duration'].cumsum()
-        
-        # Rename columns to have title capitalization and units
-        playlist.rename(columns={
-            'duration': 'Duration (mm:ss)',
-            'tempo': 'Tempo (BPM)',
-            'key': 'Key',
-            'tempo_adjustment_factor': 'Tempo Adjustment Factor'
-        }, inplace=True)
-        
-        # Format the Song Start Time into a string of hh:mm:ss
-        playlist['Song Start Time'] = pd.to_datetime(playlist['Song Start Time'], unit='s').dt.strftime('%H:%M:%S')
-        
-        # Convert the duration into a string of mm:ss
-        playlist['Duration (mm:ss)'] = (pd.to_datetime(playlist['Duration (mm:ss)'], unit='s')
-                                        .dt.strftime('%M:%S'))
-        
-        # Convert the key from an integer into a string using your mapping dictionary
-        playlist["Key"] = playlist["Key"].replace(self.key_mapping)
-        
-        # Prepare data for the plot
-        x_values = np.arange(1, len(playlist) + 1)
-        y_values = playlist['Tempo (BPM)']
-        colors = ['#EF553B' if taf != 1 else '#636EFA' for taf in playlist['Tempo Adjustment Factor']]
-        symbols = ['diamond' if taf != 1 else 'circle' for taf in playlist['Tempo Adjustment Factor']]
-        
-        hover_texts = [
-            f"<b>Title: {row['name']}</b><br>"
-            f"Song Number: {i + 1}<br>"
-            f"Song Start Time: {row['Song Start Time']}<br>"
-            f"Tempo (BPM): {round(row['Tempo (BPM)'])}<br>"
-            f"Key: {row['Key']}<br>"
-            f"Duration (mm:ss): {row['Duration (mm:ss)']}<br>"
-            f"Tempo Adjustment Factor: {row['Tempo Adjustment Factor']}"
-            for i, (_, row) in enumerate(playlist.iterrows())
-        ]
-        
-        
-        # Add a single trace
-        fig.add_trace(
-            go.Scatter(
-                x=x_values,
-                y=y_values,
-                mode='lines+markers',
-                marker=dict(color=colors, symbol=symbols, size=10),
-                hoverinfo='text',
-                hovertext=hover_texts,
-                name="Analyzed Playlist",
+        if analyzed_playlist is not None:
+            playlist = analyzed_playlist.copy()
+            
+            # Calculate the cumulative runtime of the songs
+            playlist['Song Start Time'] = playlist['duration'].cumsum()
+            
+            # Rename columns to have title capitalization and units
+            playlist.rename(columns={
+                'duration': 'Duration (mm:ss)',
+                'tempo': 'Tempo (BPM)',
+                'key': 'Key',
+                'tempo_adjustment_factor': 'Tempo Adjustment Factor'
+            }, inplace=True)
+            
+            # Format the Song Start Time into a string of hh:mm:ss
+            playlist['Song Start Time'] = pd.to_datetime(playlist['Song Start Time'], unit='s').dt.strftime('%H:%M:%S')
+            
+            # Convert the duration into a string of mm:ss
+            playlist['Duration (mm:ss)'] = (pd.to_datetime(playlist['Duration (mm:ss)'], unit='s')
+                                            .dt.strftime('%M:%S'))
+            
+            # Convert the key from an integer into a string using your mapping dictionary
+            playlist["Key"] = playlist["Key"].replace(self.key_mapping)
+            
+            # Prepare data for the plot
+            x_values = np.arange(1, len(playlist) + 1)
+            y_values = playlist['Tempo (BPM)']
+            colors = ['#EF553B' if taf != 1 else '#636EFA' for taf in playlist['Tempo Adjustment Factor']]
+            symbols = ['diamond' if taf != 1 else 'circle' for taf in playlist['Tempo Adjustment Factor']]
+            
+            hover_texts = [
+                f"<b>Title: {row['name']}</b><br>"
+                f"Song Number: {i + 1}<br>"
+                f"Song Start Time: {row['Song Start Time']}<br>"
+                f"Tempo (BPM): {round(row['Tempo (BPM)'])}<br>"
+                f"Key: {row['Key']}<br>"
+                f"Duration (mm:ss): {row['Duration (mm:ss)']}<br>"
+                f"Tempo Adjustment Factor: {row['Tempo Adjustment Factor']}"
+                for i, (_, row) in enumerate(playlist.iterrows())
+            ]
+            
+            
+            # Add a single trace
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values,
+                    y=y_values,
+                    mode='lines+markers',
+                    marker=dict(color=colors, symbol=symbols, size=10),
+                    hoverinfo='text',
+                    hovertext=hover_texts,
+                    name="Analyzed Playlist",
+                )
             )
-        )
-        
+            
         if target_profile is not None:
 
             # Define default target_profile_kwargs and update with function inputs

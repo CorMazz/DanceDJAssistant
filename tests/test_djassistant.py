@@ -73,7 +73,7 @@ pl_url = "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTU
 
 if __name__ == "__main__":
     
-    test_db = 0
+    test_db = 1
     test_plot_plotly = 1
     
     load_dev_env_variables(r"C:\Users\mazzac3\Documents\GitHub\dance-dj-webapp\.env")
@@ -187,7 +187,7 @@ if __name__ == "__main__":
             )
             
             n_songs = len(playlist_summary)
-            target_profile = dj.generate_sinusoidal_profile((70, 130), 6, 0, n_songs, n_songs * 5)
+            target_profile = dj.generate_sinusoidal_profile((70, 130), 6, 0, n_songs, 0.1, n_songs * 5)
             
             fig = dj.plot_playlist_plotly(analyzed_playlist=playlist_summary, target_profile=target_profile)
             dj.plot_profile_matplotlib(target_profile=target_profile, analyzed_playlist=playlist_summary)
