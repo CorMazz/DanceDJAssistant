@@ -68,13 +68,15 @@ def load_dev_env_variables(env_file=".env"):
 ########################################################################################################################
 
 # Playlist must have at least 20 songs.
-pl_url = "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTUe4sXAuwgnsMw&pi=G1Ml4W56TOize" 
+pl_url = "https://open.spotify.com/playlist/0Xm1fiZESD8wqm8m2lT54Q?si=a0435ea9c01d4189"
+       # "https://open.spotify.com/playlist/7MVcmq2Dvir4lRvIWQ4J0f?si=nc-knGZrTUe4sXAuwgnsMw&pi=G1Ml4W56TOize" 
 
 
 if __name__ == "__main__":
     
-    test_db = 1
-    test_plot_plotly = 1
+    test_db = 0
+    test_playlist_matching = 1
+    test_plot_plotly = 0
     
     load_dev_env_variables(r"C:\Users\mazzac3\Documents\GitHub\dance-dj-webapp\.env")
     
@@ -161,6 +163,164 @@ if __name__ == "__main__":
                     song_names=playlist_songs.values(),
                 )
                 
+                
+    ####################################################################################################################
+    #%% Test Playlist Matching Functionality
+    ####################################################################################################################
+    
+    if test_playlist_matching:
+        
+        # Looks like the upsampled euclidean doesn't really work. Nor does global undamped.
+    
+        # Define your database connection URL
+        DATABASE_URL = "sqlite:///test_only.db"
+        
+        # Create the SQLAlchemy engine
+        engine = create_engine(DATABASE_URL)
+        
+        test_config_settings = {
+            
+            "Naive Undamped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0,
+                ),
+                matching_method="naive"
+            ),
+            
+            "Naive Damped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0.01,
+                ),
+                matching_method="naive"
+            ),
+            
+            "Global Naive Undamped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0,
+                ),
+                matching_method="global_naive"
+            ),
+            
+            "Global Naive Damped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0.01,
+                ),
+                matching_method="global_naive"
+            ),
+            
+            "Euclidean Undamped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0,
+                ),
+                matching_method="euclidean"
+            ),
+            
+            "Euclidean Damped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0.01,
+                ),
+                matching_method="euclidean"
+            ),
+            
+            "Euclidean Undamped Oversampled Target Profile": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0,
+                    n_points=50*50
+                ),
+                matching_method="euclidean"
+            ),
+            
+            "Upsampled Euclidean Undamped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0,
+                ),
+                matching_method="upsampled_euclidean"
+            ),
+            
+            "Upsampled Euclidean Damped": dict(
+                pl_url=pl_url,
+                target_profile=dict(
+                    tempo_bounds=(70, 130),
+                    n_cycles=6,
+                    horizontal_shift=0,
+                    damping_coefficient=0.01,
+                ),
+                matching_method="upsampled_euclidean"
+            ),
+        }
+        
+        with Session(engine) as session:
+        
+            dj=DanceDJ(spotify_obj=spotify_obj, db_session=session)
+
+            for test_name, test_config in test_config_settings.items():
+                
+                # Parse the given playlist
+                playlist_songs = dj.parse_playlist(playlist_id=test_config["pl_url"])
+                
+                # Analyze the playlist
+                playlist_summary = dj.analyze_songs(
+                    song_ids=playlist_songs.keys(),
+                    song_names=playlist_songs.values(),
+                )
+                
+                n_songs = len(playlist_summary)
+                target_profile = dj.generate_sinusoidal_profile(n_songs=n_songs, **test_config["target_profile"])
+                
+                rearranged_playlist = dj.match_tempo_profile(
+                    target_profile[:, 1], 
+                    playlist_summary,
+                    method=test_config["matching_method"]
+                )
+                
+                fig, ax = dj.plot_profile_matplotlib(
+                    target_profile=target_profile, 
+                    analyzed_playlist=rearranged_playlist
+                )
+                ax.set_title(test_name)
+                
+                fig = dj.plot_playlist_plotly(
+                    analyzed_playlist=rearranged_playlist,
+                    target_profile=target_profile,
+                    update_layout_kwargs=dict(title=test_name),
+                )
+                fig.write_html(f"playlist_matching_plots/{test_name.lower().replace(' ', '_')}.html")
+                    
+                
+    
+                
     ####################################################################################################################
     #%% Plotly Functionality
     ####################################################################################################################
@@ -201,6 +361,7 @@ if __name__ == "__main__":
         # fig.show(renderer="browser")
 
         
+
         # fig = dj.plot_
 # # -------------------------------------------------------------------------------------------------
 # # Match Profile 

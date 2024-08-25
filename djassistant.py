@@ -420,6 +420,10 @@ class DanceDJ:
                 the target BPM and the song's BPM. Thus, if there are a limited number of songs in 
                 the song_summary_df, the beginning of the playlist is more likely to accurately 
                 represent the target profile than the end of the playlist.
+            "global_naive":
+                Attempts to match the playlist to the profile by sorting the profile and the playlist in ascending order
+                and then assigning a 1 to 1 correspondence from song to playlist location. Doesn't really work to well
+                but I left it for posterity. 
             "euclidean":
                 Minimize the vertical euclidean distances between the target profile and the 
                 achieved profile. Utilizes linear sum assignment to solve the optimization problem.
@@ -454,7 +458,7 @@ class DanceDJ:
             
             # Loop through each position of the tempo profile and find the closest song
             for bpm in tempo_profile:
-                if not song_summary_df:
+                if not len(song_summary_df):
                     break
                 
                 min_idx = np.argmin(abs(song_summary_df['tempo'] - bpm))
@@ -467,6 +471,20 @@ class DanceDJ:
                 
             # Turn the list into a DataFrame
             selected_songs = pd.concat(selected_songs, axis=1).T
+        
+        elif method == "global_naive":
+                        
+            if len(tempo_profile) != len(song_summary_df):
+                raise ValueError("The number of points in the profile must exactly match the number of songs in the "
+                                 "playlist for the global naive method.")
+                
+            # Sort the sine curve by magnitude, sort the songs by magnitude, match them up to each other
+            selected_songs = (
+                song_summary_df
+                .sort_values(by="tempo", ascending=True)
+                .iloc[np.argsort(tempo_profile), :]
+            )
+            
             
         elif method == "euclidean" or method == "upsampled_euclidean":
             # https://stackoverflow.com/questions/39016821/minimize-total-distance-between-two-sets-of-points-in-python
@@ -500,6 +518,9 @@ class DanceDJ:
             
             # Set the song assignment
             selected_songs = song_summary_df.iloc[song_idxs, :]
+            
+        else:
+            raise ValueError("Check the documentation for appropriate values for the 'method' parameter.")
             
         return selected_songs
 
