@@ -11,8 +11,11 @@ DJAssistant is a Python library designed to interact with Spotify's Web API for 
 ## Features
 
 Parse Playlists: Fetches song IDs and names from a Spotify playlist.
+
 Analyze Songs: Retrieves detailed audio features for each song, including tempo, key, and time signature.
+
 Match Tempo Profiles: Rearranges songs to fit a desired tempo profile using various optimization methods.
+
 Save Playlists: Uploads curated playlists to your Spotify account, with optional descriptions and custom cover images.
 
 ## Example
